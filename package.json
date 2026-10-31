@@ -1,0 +1,33 @@
+{
+  "name": "discordia",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "call": "node scripts/call.mjs",
+    "dev:signal": "wrangler dev --config worker/wrangler.toml --port 8787",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261031.1",
+    "@playwright/test": "^1.64.1",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "svelte": "^5.57.3",
+    "svelte-check": "^4.7.7",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.156.0"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
