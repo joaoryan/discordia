@@ -65,7 +65,13 @@ ALLOWED_ORIGINS = "https://SEU-SITE.vercel.app"
 
 ### 4. TURN (recomendado)
 
-Sem TURN, quem estiver atrás de NAT restritivo não conecta. O plano gratuito da Cloudflare cobre 1.000 GB por mês.
+Sem TURN, quem estiver atrás de NAT restritivo não conecta. O Worker usa a Metered, com 50 GB grátis por mês e sem cartão: `METERED_APP` fica em `worker/wrangler.toml`, e a chave vai como segredo:
+
+```bash
+npx wrangler secret put METERED_API_KEY --config worker/wrangler.toml
+```
+
+A alternativa é o TURN da Cloudflare, com 1.000 GB grátis por mês, que pede cartão.
 
 1. No painel da Cloudflare, abra **Realtime → TURN** e crie uma chave.
 2. Grave os dois segredos:

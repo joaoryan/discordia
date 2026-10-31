@@ -284,8 +284,8 @@ Medido na implementação em 31/10/2026, em uma única máquina, com mídia simu
 
 | Item | Resultado |
 |---|---|
-| Testes de lógica do host | 37 de 37 |
-| Testes de ponta a ponta | 58 de 58, em duas execuções seguidas |
+| Testes de lógica do host | 38 de 38 |
+| Testes de ponta a ponta | 62 de 62 |
 | Chromium ↔ Firefox | 10 de 10 repetições |
 | Malha de voz com 10 pessoas | 10 processos, cada um com microfone ativo e áudio recebido dos outros 9; a décima primeira é recusada |
 | Transmissão com 5 espectadores | 7 processos; o sexto espectador é recusado |

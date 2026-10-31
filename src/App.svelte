@@ -26,6 +26,11 @@
     if (loadProfile()) open((s) => s.resume(saved));
   }
 
+  window.addEventListener('hashchange', () => {
+    invite = normalizeCode(location.hash.slice(1)) ?? '';
+    if (profile && !session) followInvite();
+  });
+
   // Quem abre um link de convite já tem o código preenchido.
   $effect(() => {
     if (session?.phase === 'ended') {
@@ -51,9 +56,21 @@
   }
 
   function setProfile(next: Profile) {
+    const firstTime = !profile;
     profile = next;
     saveProfile(next);
+    if (firstTime) followInvite();
   }
+
+  // Abrir um link de convite já entra na sala; o código da tela inicial é para quem digita.
+  function followInvite() {
+    const code = invite;
+    invite = '';
+    if (code) open((s) => s.join(code));
+  }
+
+  // svelte-ignore state_referenced_locally
+  if (!saved && loadProfile() && invite) followInvite();
 </script>
 
 {#if !profile}
@@ -72,6 +89,7 @@
       <div class="card center">
         <div class="spin"><Avatar name={profile.name} avatar={profile.avatar} color={profile.color} size={64} /></div>
         <h1>{session.isHost ? 'Criando sala…' : 'Conectando ao host…'}</h1>
+        {#if !session.isHost}<p>Pode levar até 20 segundos.</p>{/if}
         <button class="btn" onclick={() => { session?.close(); session = null; }}>Cancelar</button>
       </div>
     </main>

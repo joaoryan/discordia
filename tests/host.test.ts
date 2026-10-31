@@ -230,6 +230,14 @@ describe('RoomHost', () => {
       expect(t.host.members.has('a2')).toBe(false);
     });
 
+    it('duas abas do mesmo navegador são pessoas diferentes', () => {
+      t.host.admit('x', profile('Aba 1'), 'pc', 'aba-1');
+      t.host.admit('y', profile('Aba 2'), 'pc', 'aba-2');
+      expect(t.host.members.has('x') && t.host.members.has('y')).toBe(true);
+      t.host.admit('z', profile('Aba 1'), 'pc', 'aba-1'); // a mesma aba reconectando
+      expect(t.host.members.has('x')).toBe(false);
+    });
+
     it('um id só é retomado pelo cliente dono dele', () => {
       expect(t.host.ownsId('a', 'c-a')).toBe(true);
       expect(t.host.ownsId('a', 'invasor')).toBe(false);

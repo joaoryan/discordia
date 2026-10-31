@@ -104,7 +104,7 @@ export type ModAction =
   | { action: 'remove-channel'; id: string };
 
 export type ClientMsg =
-  | { t: 'hello'; profile: Profile; clientId: string }
+  | { t: 'hello'; profile: Profile; clientId: string; tab: string }
   | { t: 'chat'; channel: string; text: string; replyTo?: string; attachment?: Attachment }
   | { t: 'edit'; channel: string; message: string; text: string }
   | { t: 'delete'; channel: string; message: string }

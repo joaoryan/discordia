@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "call": "node scripts/call.mjs",
-    "dev:signal": "wrangler dev --config worker/wrangler.toml --port 8787",
+    "dev:signal": "wrangler dev --config worker/wrangler.toml --port 8787 --var ALLOWED_ORIGINS:*",
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",

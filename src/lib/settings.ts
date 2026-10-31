@@ -2,7 +2,7 @@
 import type { Profile } from './protocol';
 import type { ThemeId } from './theme';
 
-const KEYS = { profile: 'discordia.profile', settings: 'discordia.settings', client: 'discordia.client', recent: 'discordia.recent' };
+const KEYS = { profile: 'discordia.profile', settings: 'discordia.settings', client: 'discordia.client', recent: 'discordia.recent', tab: 'discordia.tab' };
 
 /** Ajustes que valem só para quem os fez; ninguém mais fica sabendo. */
 export interface UserAudio {
@@ -85,6 +85,20 @@ export function clientId() {
     write(KEYS.client, id);
   }
   return id;
+}
+
+/** Cada aba é uma pessoa na sala; sessionStorage sobrevive ao F5, mas não é dividido entre abas. */
+export function tabId() {
+  try {
+    let id = sessionStorage.getItem(KEYS.tab);
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem(KEYS.tab, id);
+    }
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
 }
 
 export interface RecentRoom {

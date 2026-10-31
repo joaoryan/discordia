@@ -54,6 +54,21 @@ test('quem está em outro canal de voz não entra na malha', async ({ browser })
   expect(Object.keys(await stats(host))).toHaveLength(0);
 });
 
+test('trocar de canal mantém o microfone e a voz com quem está lá', async ({ browser }) => {
+  const host = await person(browser, 'Host');
+  const code = await createRoom(host);
+  const ana = await person(browser, 'Ana');
+  await joinRoom(ana, code);
+  await host.getByRole('button', { name: 'Jogos', exact: true }).click();
+  await ana.getByRole('button', { name: 'Saguão', exact: true }).click();
+  await expect(host.locator('.voice-member')).toHaveCount(2);
+
+  await ana.getByRole('button', { name: 'Jogos', exact: true }).first().click();
+  await expect.poll(async () => Object.values(await stats(host)).map((s: any) => s.state).join(), { timeout: 15_000 }).toBe('connected');
+  expect(await ana.evaluate(() => (window as any).session.media.mic?.getAudioTracks()[0].readyState)).toBe('live');
+  await expect.poll(async () => (await receivedFrom(host))[0] ?? 0, { timeout: 10_000 }).toBeGreaterThan(1000);
+});
+
 test('sem microfone a pessoa entra apenas ouvindo', async ({ browser }) => {
   const host = await person(browser, 'Host');
   const code = await createRoom(host);

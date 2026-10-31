@@ -7,7 +7,7 @@ import { watchPressure, type Pressure } from './metrics';
 import { MediaEngine, type ScreenQuality } from './media';
 import { LIMITS, emptyVoice, type Attachment, type Channel, type ClientMsg, type HostMsg, type Member, type Message, type ModAction, type Profile, type RadioCmd, type RadioState, type VoiceState } from './protocol';
 import { clearRoom, saveRoom, type SavedRoom } from './roomStore';
-import { clientId, defaultUserAudio, loadSettings, rememberRoom, saveSettings, type Settings, type UserAudio } from './settings';
+import { clientId, tabId, defaultUserAudio, loadSettings, rememberRoom, saveSettings, type Settings, type UserAudio } from './settings';
 import { SIGNAL_ERRORS, SignalClient, fetchIceServers } from './signaling';
 import { setSoundOutput, sounds } from './sounds';
 import { applyTheme } from './theme';
@@ -248,7 +248,7 @@ export class RoomSession {
         link?.closeSoon();
       },
     });
-    this.host.admit('host', this.profile, clientId());
+    this.host.admit('host', this.profile, clientId(), tabId());
   }
 
   private acceptGuest(id: string) {
@@ -257,16 +257,16 @@ export class RoomSession {
       open: () => {},
       message: (msg: ClientMsg) => {
         if (msg.t !== 'hello') return this.links.get(id) === link && this.host?.handle(id, msg);
-        const client = String(msg.clientId);
-        // Reaproveitar um id exige ser o mesmo cliente; senão alguém assumiria o lugar de outro.
-        if (this.host && !this.host.ownsId(id, client)) {
+        const tab = String(msg.tab);
+        // Reaproveitar um id exige ser a mesma aba; senão alguém assumiria o lugar de outro.
+        if (this.host && !this.host.ownsId(id, tab)) {
           link.send({ t: 'refused', reason: 'Não foi possível entrar na sala.' } satisfies HostMsg);
           return link.closeSoon();
         }
         const old = this.links.get(id);
         this.links.set(id, link);
         if (old !== link) old?.close();
-        this.host?.admit(id, msg.profile, client);
+        this.host?.admit(id, msg.profile, String(msg.clientId), tab);
       },
       close: () => {
         pending.delete(link);
@@ -323,7 +323,7 @@ export class RoomSession {
       });
       const link: Link = new Link(this.iceServers, GUEST_INBOUND, {
         signal: (data) => signal.send('host', data),
-        open: () => link.send({ t: 'hello', profile: this.profile, clientId: clientId() } satisfies ClientMsg),
+        open: () => link.send({ t: 'hello', profile: this.profile, clientId: clientId(), tab: tabId() } satisfies ClientMsg),
         message: (msg: HostMsg) => this.apply(msg),
         close: () => {
           if (!settled) fail('A conexão com o host falhou.');
@@ -602,8 +602,8 @@ export class RoomSession {
     if (this.joining) return; // clique duplo abriria dois microfones
     this.voiceView = true;
     if (this.voice.channel === channel) return;
-    if (this.voice.channel) this.leaveVoice();
-    this.voiceView = true;
+    // Troca direta: sair e entrar faria o "saí" voltar do host e desligar o microfone novo.
+    if (this.voice.channel) return this.moveVoice(channel);
     this.joining = true;
 
     let muted = false;
@@ -624,6 +624,14 @@ export class RoomSession {
     this.joining = false;
     this.applyMic(muted);
     this.pushVoice({ channel, muted, deafened: false, camera: null, screen: null, screenAudio: false, radio: null });
+    if (this.settings.sounds) sounds.join();
+  }
+
+  private moveVoice(channel: string) {
+    if (this.localCamera) void this.toggleCamera();
+    if (this.localScreen) this.stopScreen();
+    this.media.stopRadio();
+    this.pushVoice({ channel, camera: null, screen: null, screenAudio: false, radio: null });
     if (this.settings.sounds) sounds.join();
   }
 

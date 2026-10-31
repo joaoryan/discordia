@@ -6,6 +6,8 @@ interface Env {
   ROOMS: DurableObjectNamespace<Room>;
   ALLOWED_ORIGINS?: string;
   RATE_LIMIT_PER_MIN?: string;
+  METERED_APP?: string;
+  METERED_API_KEY?: string;
   TURN_KEY_ID?: string;
   TURN_KEY_API_TOKEN?: string;
 }
@@ -14,6 +16,7 @@ const CODE = /^[A-HJKMNP-Z2-9]{6}$/;
 const HOST_GRACE_MS = 30_000; // F5 ou queda rápida do host não mata a sala
 const GUEST_ID = /^[0-9a-f]{8}$/;
 const MAX_SIGNAL = 16_384;
+const METERED_CACHE_MS = 10 * 60 * 1000;
 const MAX_PENDING_GUESTS = 40;
 const FALLBACK_ICE = [{ urls: 'stun:stun.cloudflare.com:3478' }];
 
@@ -33,14 +36,28 @@ function limited(ip: string, max: number) {
 
 function originAllowed(origin: string | null, env: Env) {
   const allowed = (env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
-  return allowed.length === 0 || (origin !== null && allowed.includes(origin));
+  return allowed.length === 0 || allowed.includes('*') || (origin !== null && allowed.includes(origin));
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {
   return { 'Access-Control-Allow-Origin': origin ?? '*', Vary: 'Origin' };
 }
 
+let meteredCache: { servers: unknown; until: number } | null = null;
+
+// A chave fica aqui no Worker: o navegador recebe só as credenciais de relay.
+async function meteredServers(env: Env) {
+  if (meteredCache && meteredCache.until > Date.now()) return meteredCache.servers;
+  const url = `https://${env.METERED_APP}.metered.live/api/v1/turn/credentials?apiKey=${env.METERED_API_KEY}`;
+  const res = await fetch(url);
+  if (!res.ok) return FALLBACK_ICE;
+  const servers = await res.json();
+  meteredCache = { servers, until: Date.now() + METERED_CACHE_MS };
+  return servers;
+}
+
 async function iceServers(env: Env) {
+  if (env.METERED_APP && env.METERED_API_KEY) return meteredServers(env);
   if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return FALLBACK_ICE;
   const res = await fetch(
     `https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`,

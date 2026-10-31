@@ -15,3 +15,4 @@ new_sqlite_classes = ["Room"]
 # Origens permitidas, separadas por vírgula. Vazio libera tudo (só para desenvolvimento).
 ALLOWED_ORIGINS = ""
 RATE_LIMIT_PER_MIN = "30"
+METERED_APP = "discordia-call"

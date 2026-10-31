@@ -21,7 +21,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'npx wrangler dev --config worker/wrangler.toml --port 8787 --var RATE_LIMIT_PER_MIN:1000',
+      command: 'npx wrangler dev --config worker/wrangler.toml --port 8787 --var RATE_LIMIT_PER_MIN:1000 --var ALLOWED_ORIGINS:*',
       url: 'http://localhost:8787/ice',
       reuseExistingServer: true,
       env: { WRANGLER_SEND_METRICS: 'false' },

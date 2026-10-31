@@ -26,7 +26,8 @@ const MAX_QUEUE = 200;
 const VIDEO_ID = /^[\w-]{11}$/;
 
 interface Conn {
-  clientId: string;
+  clientId: string; // navegador: vale para banimento
+  tab: string; // aba: identifica a pessoa, para reconhecer quem reconecta
   tokens: number;
   lastRefill: number;
 }
@@ -133,9 +134,9 @@ export class RoomHost {
   }
 
   /** Mesma conexão de sempre ou id recém-chegado? Um id só volta com o cliente dono dele. */
-  ownsId(id: string, clientId: string) {
+  ownsId(id: string, tab: string) {
     const conn = this.conns.get(id);
-    return !conn || conn.clientId === clientId;
+    return !conn || conn.tab === tab;
   }
 
   /** Fim da carência: quem não voltou agora conta como ausente. */
@@ -152,7 +153,7 @@ export class RoomHost {
     return [...this.members.values()];
   }
 
-  admit(id: string, profile: Profile, clientId: string) {
+  admit(id: string, profile: Profile, clientId: string, tab = clientId) {
     const isHost = id === this.opts.hostId;
     const refuse = (reason: string) => {
       this.opts.send(id, { t: 'refused', reason });
@@ -160,20 +161,20 @@ export class RoomHost {
     };
     if (!isHost) {
       if (this.banned.has(clientId)) return refuse('Você foi banido desta sala.');
-      if (this.locked && !this.known.has(clientId)) return refuse('O host trancou esta sala.');
+      if (this.locked && !this.known.has(tab)) return refuse('O host trancou esta sala.');
       if (this.members.size >= LIMITS.members) return refuse('A sala está cheia.');
     }
 
     // Mesma pessoa reconectando: a conexão antiga já não serve.
     for (const [other, conn] of this.conns) {
-      if (conn.clientId === clientId && other !== id) {
+      if (conn.tab === tab && other !== id) {
         this.opts.drop(other);
         this.remove(other);
       }
     }
 
-    const returning = this.members.has(id) || this.known.has(clientId);
-    this.known.add(clientId);
+    const returning = this.members.has(id) || this.known.has(tab);
+    this.known.add(tab);
     const member: Member = {
       ...cleanProfile(profile),
       id,
@@ -182,7 +183,7 @@ export class RoomHost {
       speaking: false,
     };
     this.members.set(id, member);
-    this.conns.set(id, { clientId, tokens: CHAT_BURST, lastRefill: this.now() });
+    this.conns.set(id, { clientId, tab, tokens: CHAT_BURST, lastRefill: this.now() });
 
     this.opts.send(id, {
       t: 'welcome',
@@ -543,8 +544,8 @@ export class RoomHost {
       case 'ban': {
         if (mod.id === this.opts.hostId || !this.members.has(mod.id)) return;
         const banned = mod.action === 'ban';
-        const { clientId } = this.conns.get(mod.id)!;
-        this.known.delete(clientId); // expulso volta como qualquer visitante
+        const { clientId, tab } = this.conns.get(mod.id)!;
+        this.known.delete(tab); // expulso volta como qualquer visitante
         if (banned) this.banned.add(clientId);
         this.opts.send(mod.id, { t: 'kicked', banned });
         this.opts.drop(mod.id);
