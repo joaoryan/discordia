@@ -35,11 +35,10 @@ test('código inexistente e código malformado', async ({ browser }) => {
   await expect(page.getByText('Códigos têm 6 caracteres')).toBeVisible();
 });
 
-test('link de convite preenche o código', async ({ browser }) => {
+test('link de sala que não existe volta para o início com o motivo', async ({ browser }) => {
   const page = await person(browser, 'Ana');
   await page.goto('/#AB7-K2Q');
-  await page.reload();
-  await expect(page.getByLabel('Código da sala')).toHaveValue('AB7K2Q');
+  await expect(page.getByRole('alert')).toHaveText('Não existe sala com esse código.');
 });
 
 test('host encerra a sala: todos saem e o código morre', async ({ browser }) => {
