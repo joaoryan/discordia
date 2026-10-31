@@ -1,0 +1,17 @@
+name = "discordia-signal"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# Só o backend SQLite existe no plano gratuito.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[vars]
+# Origens permitidas, separadas por vírgula. Vazio libera tudo (só para desenvolvimento).
+ALLOWED_ORIGINS = ""
+RATE_LIMIT_PER_MIN = "30"
