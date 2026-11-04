@@ -1,4 +1,4 @@
-# Gera o app de computador nos três sistemas a cada tag v*, e publica no Release do GitHub.
+# Gera o app de computador para Windows e Linux a cada tag v*, e publica no Release do GitHub.
 # O app atualiza sozinho a partir desses Releases (electron-updater), e o botão do site baixa dali.
 name: App de computador
 
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  # Cria o rascunho antes, para os três sistemas enviarem para o mesmo Release.
+  # Cria o rascunho antes, para os dois sistemas enviarem para o mesmo Release.
   release:
     runs-on: ubuntu-latest
     steps:
@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,11 +44,11 @@ jobs:
           VITE_SIGNAL_URL: ${{ vars.VITE_SIGNAL_URL }}
           VITE_PUBLIC_URL: ${{ vars.VITE_PUBLIC_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Assinatura: sem os segredos abaixo o app sai sem assinatura (aviso do Windows e bloqueio no macOS).
+          # Assinatura: sem os segredos abaixo o app sai sem assinatura (aviso do Windows).
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
 
-  # Só publica quando os três instaladores estão lá: o botão do site nunca aponta para um arquivo que falta.
+  # Só publica quando os instaladores estão lá: o botão do site nunca aponta para um arquivo que falta.
   publish:
     needs: build
     runs-on: ubuntu-latest

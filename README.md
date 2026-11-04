@@ -104,11 +104,11 @@ npm run desktop:dev    # abre o app apontando para a sinalização local (rode n
 npm run desktop:dist   # gera o instalador do sistema atual em desktop/release
 ```
 
-Para o app falar com o Worker publicado, gere com `VITE_SIGNAL_URL` (Worker) e `VITE_PUBLIC_URL` (site, usado no link de convite). A cada tag `v*`, o GitHub Actions gera os instaladores de Windows, macOS e Linux e publica no Release; o app se atualiza a partir dali. Defina as duas variáveis em **Settings → Secrets and variables → Actions → Variables**.
+Para o app falar com o Worker publicado, gere com `VITE_SIGNAL_URL` (Worker) e `VITE_PUBLIC_URL` (site, usado no link de convite). A cada tag `v*`, o GitHub Actions gera os instaladores de Windows e Linux e publica no Release (o site oferece o download na tela inicial); o app se atualiza a partir dali. Defina as duas variáveis em **Settings → Secrets and variables → Actions → Variables**.
 
-- **Assinatura:** sem certificado, o Windows mostra "Editor desconhecido" e o macOS bloqueia o app na primeira abertura. Os segredos `CSC_LINK` e `CSC_KEY_PASSWORD` ativam a assinatura no CI.
+- **Assinatura:** sem certificado, o Windows mostra "Editor desconhecido". Os segredos `CSC_LINK` e `CSC_KEY_PASSWORD` ativam a assinatura no CI.
 - **Linux:** o sandbox do Chromium precisa de `chrome-sandbox` com dono root e SUID (`sudo chown root chrome-sandbox && sudo chmod 4755 chrome-sandbox`); o pacote `.deb` já faz isso. Atalhos globais funcionam no X11; no Wayland, só com programas do XWayland.
-- **macOS:** apertar para falar global pede a permissão de Acessibilidade; o áudio do computador na transmissão ainda não é capturado.
+- **macOS:** não há instalador por enquanto; no Mac, use pelo navegador.
 - **Mini janela:** começa compacta (só os rostos, com destaque em quem fala, e o microfone) e expande para nomes e controles; lembra o modo e o lugar onde foi arrastada. Aparece sobre jogos em tela cheia "sem bordas"; tela cheia exclusiva fica por cima dela.
 
 ## Atalhos
