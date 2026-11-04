@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { rangeFill } from '../lib/actions';
   import type { RoomSession } from '../lib/session.svelte';
 
   const WIDTH = 240;
@@ -21,13 +22,13 @@
 
     <label>
       <span>Volume <b>{Math.round(audio.volume * 100)}%</b></span>
-      <input type="range" min="0" max="1" step="0.05" aria-label="Volume de {name}" value={audio.volume} oninput={(e) => session.setUserAudio(name, { volume: Number(e.currentTarget.value) })} />
+      <input type="range" use:rangeFill={audio.volume} min="0" max="1" step="0.05" aria-label="Volume de {name}" value={audio.volume} oninput={(e) => session.setUserAudio(name, { volume: Number(e.currentTarget.value) })} />
     </label>
 
     {#if member.voice.screen}
       <label>
         <span>Transmissão <b>{Math.round(audio.screenVolume * 100)}%</b></span>
-        <input type="range" min="0" max="1" step="0.05" aria-label="Volume da transmissão de {name}" value={audio.screenVolume} oninput={(e) => session.setUserAudio(name, { screenVolume: Number(e.currentTarget.value) })} />
+        <input type="range" use:rangeFill={audio.screenVolume} min="0" max="1" step="0.05" aria-label="Volume da transmissão de {name}" value={audio.screenVolume} oninput={(e) => session.setUserAudio(name, { screenVolume: Number(e.currentTarget.value) })} />
       </label>
     {/if}
 

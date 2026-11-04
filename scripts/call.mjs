@@ -17,7 +17,7 @@ process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 
 console.log('Iniciando sinalização, app e túnel...');
-run(['wrangler', 'dev', '--config', 'worker/wrangler.toml', '--port', '8787', '--var', 'RATE_LIMIT_PER_MIN:300'], {
+run(['wrangler', 'dev', '--config', 'worker/wrangler.toml', '--port', '8787', '--var', 'RATE_LIMIT_PER_MIN:300', '--var', 'ALLOWED_ORIGINS:*'], {
   WRANGLER_SEND_METRICS: 'false',
 });
 run(['vite', '--port', '5173', '--strictPort']);

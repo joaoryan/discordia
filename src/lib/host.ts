@@ -20,13 +20,15 @@ import {
 const CHAT_BURST = 10;
 const CHAT_REFILL_MS = 1000;
 const IMAGE_AVATAR = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+const FRIEND_KEY = /^[A-Za-z0-9_-]{87}$/;
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const MAX_CHANNELS = 24;
 const MAX_QUEUE = 200;
 const VIDEO_ID = /^[\w-]{11}$/;
 
 interface Conn {
-  clientId: string;
+  clientId: string; // navegador: vale para banimento
+  tab: string; // aba: identifica a pessoa, para reconhecer quem reconecta
   tokens: number;
   lastRefill: number;
 }
@@ -65,6 +67,7 @@ export function cleanProfile(input: Partial<Profile> | undefined): Profile {
     name,
     avatar: avatar.length <= LIMITS.avatar && IMAGE_AVATAR.test(avatar) ? avatar : '',
     color: HEX_COLOR.test(color) ? color : '#e8a33d',
+    ...(typeof input?.friend === 'string' && FRIEND_KEY.test(input.friend) ? { friend: input.friend } : {}),
   };
 }
 
@@ -92,7 +95,7 @@ export class RoomHost {
   members = new Map<string, Member>();
   history = new Map<string, Message[]>();
   locked = false;
-  radio: Omit<RadioState, 'position' | 'needed'> | null = null;
+  radio: Omit<RadioState, 'position'> | null = null;
 
   private radioStart = 0; // relógio do host em que a faixa atual "começou"
   private radioPausedAt = 0;
@@ -133,9 +136,9 @@ export class RoomHost {
   }
 
   /** Mesma conexão de sempre ou id recém-chegado? Um id só volta com o cliente dono dele. */
-  ownsId(id: string, clientId: string) {
+  ownsId(id: string, tab: string) {
     const conn = this.conns.get(id);
-    return !conn || conn.clientId === clientId;
+    return !conn || conn.tab === tab;
   }
 
   /** Fim da carência: quem não voltou agora conta como ausente. */
@@ -152,7 +155,7 @@ export class RoomHost {
     return [...this.members.values()];
   }
 
-  admit(id: string, profile: Profile, clientId: string) {
+  admit(id: string, profile: Profile, clientId: string, tab = clientId) {
     const isHost = id === this.opts.hostId;
     const refuse = (reason: string) => {
       this.opts.send(id, { t: 'refused', reason });
@@ -160,20 +163,20 @@ export class RoomHost {
     };
     if (!isHost) {
       if (this.banned.has(clientId)) return refuse('Você foi banido desta sala.');
-      if (this.locked && !this.known.has(clientId)) return refuse('O host trancou esta sala.');
+      if (this.locked && !this.known.has(tab)) return refuse('O host trancou esta sala.');
       if (this.members.size >= LIMITS.members) return refuse('A sala está cheia.');
     }
 
     // Mesma pessoa reconectando: a conexão antiga já não serve.
     for (const [other, conn] of this.conns) {
-      if (conn.clientId === clientId && other !== id) {
+      if (conn.tab === tab && other !== id) {
         this.opts.drop(other);
         this.remove(other);
       }
     }
 
-    const returning = this.members.has(id) || this.known.has(clientId);
-    this.known.add(clientId);
+    const returning = this.members.has(id) || this.known.has(tab);
+    this.known.add(tab);
     const member: Member = {
       ...cleanProfile(profile),
       id,
@@ -182,7 +185,7 @@ export class RoomHost {
       speaking: false,
     };
     this.members.set(id, member);
-    this.conns.set(id, { clientId, tokens: CHAT_BURST, lastRefill: this.now() });
+    this.conns.set(id, { clientId, tab, tokens: CHAT_BURST, lastRefill: this.now() });
 
     this.opts.send(id, {
       t: 'welcome',
@@ -394,31 +397,30 @@ export class RoomHost {
   radioView(): RadioState | null {
     if (!this.radio) return null;
     const position = this.radio.paused ? this.radioPausedAt : (this.now() - this.radioStart) / 1000;
-    return { ...this.radio, position, needed: Math.floor(this.inRadio().length / 2) + 1 };
+    return { ...this.radio, position };
   }
 
   private publishRadio() {
     this.broadcast({ t: 'radio', radio: this.radioView() });
   }
 
+  /**
+   * A faixa que terminou volta para o fim da fila: o rádio toca em loop até alguém tirar.
+   * Ela ganha um id novo, para avisos de fim atrasados de outros clientes não pularem a volta dela.
+   */
   private nextTrack() {
     const radio = this.radio!;
     if (radio.mode === 'tab') return;
     const { queue } = radio;
-    let index = -1;
-    if (queue.length) {
-      // Mais votada primeiro; empate fica com quem chegou antes.
-      const top = Math.max(...queue.map((t) => t.votes.length));
-      const tied = queue.flatMap((t, i) => (t.votes.length === top ? [i] : []));
-      index = radio.shuffle ? tied[Math.floor(Math.random() * tied.length)] : tied[0];
-    }
-    radio.current = index >= 0 ? queue.splice(index, 1)[0] : null;
-    radio.skipVotes = [];
+    if (radio.current) queue.push({ ...radio.current, id: uid() });
+    // No aleatório, nunca repete na hora a que acabou de tocar (a última da fila).
+    const index = radio.shuffle && queue.length > 1 ? Math.floor(Math.random() * (queue.length - 1)) : 0;
+    radio.current = queue.length ? queue.splice(index, 1)[0] : null;
     radio.paused = false;
     this.radioStart = this.now();
   }
 
-  /** Reavalia DJ, votos e fim do rádio quando alguém entra ou sai do canal. */
+  /** Reavalia DJ e fim do rádio quando alguém entra ou sai do canal. */
   private reviewRadio() {
     const radio = this.radio;
     if (!radio || this.now() < this.graceUntil) return;
@@ -429,81 +431,70 @@ export class RoomHost {
       return this.publishRadio();
     }
     if (!djHere) radio.dj = (inside.find((m) => m.isHost) ?? inside[0]).id;
-    radio.skipVotes = radio.skipVotes.filter((id) => inside.some((m) => m.id === id));
-    if (radio.skipVotes.length >= Math.floor(inside.length / 2) + 1) this.nextTrack();
     this.publishRadio();
   }
 
+  /** Todos no canal do rádio controlam tudo; só o título do áudio de aba é da DJ, que é quem transmite. */
   private onRadio(member: Member, cmd: RadioCmd) {
     if (cmd?.cmd === 'start') return this.startRadio(member, cmd);
     const radio = this.radio;
     if (!radio || member.voice.channel !== radio.channel) return;
-    const inCharge = member.id === radio.dj || member.isHost;
 
     switch (cmd?.cmd) {
       case 'add': {
         if (radio.mode !== 'youtube' || !Array.isArray(cmd.tracks)) return;
+        const added: Track[] = [];
         for (const track of cmd.tracks) {
-          if (radio.queue.length >= MAX_QUEUE) break;
+          if (radio.queue.length + added.length >= MAX_QUEUE) break;
           if (!VIDEO_ID.test(String(track?.videoId))) continue;
-          radio.queue.push({
+          added.push({
             id: uid(),
             videoId: track.videoId,
             title: String(track.title ?? '').trim().slice(0, 120) || 'Música do YouTube',
             addedBy: member.name,
-            votes: [],
           });
         }
+        // O que acabou de chegar é o próximo a tocar, na ordem em que veio.
+        radio.queue.unshift(...added);
         if (!radio.current) this.nextTrack();
         break;
       }
-      case 'vote': {
-        const track = radio.queue.find((t) => t.id === cmd.id);
-        if (!track) return;
-        track.votes = track.votes.includes(member.id)
-          ? track.votes.filter((id) => id !== member.id)
-          : [...track.votes, member.id];
+      case 'up': {
+        const index = radio.queue.findIndex((t) => t.id === cmd.id);
+        if (index <= 0) return;
+        radio.queue.unshift(...radio.queue.splice(index, 1));
         break;
       }
       case 'remove': {
-        const track = radio.queue.find((t) => t.id === cmd.id);
-        if (!track || !(inCharge || track.addedBy === member.name)) return;
-        radio.queue = radio.queue.filter((t) => t !== track);
+        const before = radio.queue.length;
+        radio.queue = radio.queue.filter((t) => t.id !== cmd.id);
+        if (radio.queue.length === before) return;
         break;
       }
       case 'skip':
         if (!radio.current) return;
-        radio.skipVotes = radio.skipVotes.includes(member.id)
-          ? radio.skipVotes.filter((id) => id !== member.id)
-          : [...radio.skipVotes, member.id];
-        if (radio.skipVotes.length >= Math.floor(this.inRadio().length / 2) + 1) this.nextTrack();
+        this.nextTrack();
         break;
       case 'ended':
         // Vários clientes avisam a mesma faixa; só o primeiro aviso avança.
         if (radio.current?.id !== cmd.id) return;
         this.nextTrack();
         break;
-      case 'force-skip':
-        if (!inCharge) return;
-        this.nextTrack();
-        break;
       case 'pause': {
-        if (!inCharge || radio.paused === Boolean(cmd.paused)) return;
+        if (radio.paused === Boolean(cmd.paused)) return;
         if (cmd.paused) this.radioPausedAt = (this.now() - this.radioStart) / 1000;
         else this.radioStart = this.now() - this.radioPausedAt * 1000;
         radio.paused = Boolean(cmd.paused);
         break;
       }
       case 'shuffle':
-        if (!inCharge) return;
         radio.shuffle = !radio.shuffle;
         break;
       case 'title':
-        if (!inCharge || radio.mode !== 'tab' || !radio.current) return;
+        if (member.id !== radio.dj || radio.mode !== 'tab' || !radio.current) return;
         radio.current.title = String(cmd.title ?? '').trim().slice(0, 120) || 'Rádio ao vivo';
         break;
       case 'stop':
-        if (!inCharge) return;
         this.radio = null;
         break;
       default:
@@ -526,12 +517,11 @@ export class RoomHost {
       dj: member.id,
       current:
         mode === 'tab'
-          ? { id: uid(), videoId: null, title: String(cmd.title ?? '').trim().slice(0, 120) || 'Rádio ao vivo', addedBy: member.name, votes: [] as Track['votes'] }
+          ? { id: uid(), videoId: null, title: String(cmd.title ?? '').trim().slice(0, 120) || 'Rádio ao vivo', addedBy: member.name }
           : null,
       queue: [],
       paused: false,
       shuffle: false,
-      skipVotes: [],
     };
     this.radioStart = this.now();
     this.publishRadio();
@@ -543,8 +533,8 @@ export class RoomHost {
       case 'ban': {
         if (mod.id === this.opts.hostId || !this.members.has(mod.id)) return;
         const banned = mod.action === 'ban';
-        const { clientId } = this.conns.get(mod.id)!;
-        this.known.delete(clientId); // expulso volta como qualquer visitante
+        const { clientId, tab } = this.conns.get(mod.id)!;
+        this.known.delete(tab); // expulso volta como qualquer visitante
         if (banned) this.banned.add(clientId);
         this.opts.send(mod.id, { t: 'kicked', banned });
         this.opts.drop(mod.id);

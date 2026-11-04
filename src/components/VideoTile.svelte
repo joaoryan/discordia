@@ -70,9 +70,14 @@
     outline-offset: -2px;
   }
 
-  /* Muda várias vezes por segundo: nada de sombra desfocada nem transição aqui. */
+  /* Muda várias vezes por segundo: anel estático, sem animação nem transição (o brilho animado custava 10% de CPU). */
   .tile.speaking {
-    outline-color: var(--ok);
+    outline: 3px solid var(--accent);
+    outline-offset: -3px;
+  }
+
+  .tile.speaking :global(.avatar) {
+    box-shadow: 0 0 0 4px var(--bg-side), 0 0 0 7px var(--accent), 0 0 28px 6px rgb(var(--accent-rgb) / 35%);
   }
 
   video {

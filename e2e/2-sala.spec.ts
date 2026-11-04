@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createRoom, joinRoom, memberList, person, say, shots } from './helpers';
+import { createRoom, joinRoom, members, person, say, shots } from './helpers';
 
 test('amigos entram pelo código e o Worker sai do caminho', async ({ browser }) => {
   const host = await person(browser, 'Host');
@@ -16,7 +16,7 @@ test('amigos entram pelo código e o Worker sai do caminho', async ({ browser })
   const bia = await person(browser, 'Bia');
   await joinRoom(bia, code.toLowerCase().replace('-', ''));
 
-  for (const page of [host, ana, bia]) await expect(memberList(page).getByRole('heading')).toHaveText('Online — 3');
+  for (const page of [host, ana, bia]) await expect((await members(page)).getByRole('heading')).toHaveText('Online — 3');
   await host.screenshot({ path: `${shots}/2-membros.png` });
   expect(sockets).toHaveLength(1);
   // Convidado fecha a sinalização: daqui em diante o chat não depende do servidor.
@@ -32,14 +32,13 @@ test('código inexistente e código malformado', async ({ browser }) => {
   await expect(page.getByRole('alert')).toHaveText('Não existe sala com esse código.');
   await page.getByLabel('Código da sala').fill('123');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByText('Códigos têm 6 caracteres')).toBeVisible();
+  await expect(page.getByText('digite o código de 6 caracteres')).toBeVisible();
 });
 
-test('link de convite preenche o código', async ({ browser }) => {
+test('link de sala que não existe volta para o início com o motivo', async ({ browser }) => {
   const page = await person(browser, 'Ana');
   await page.goto('/#AB7-K2Q');
-  await page.reload();
-  await expect(page.getByLabel('Código da sala')).toHaveValue('AB7K2Q');
+  await expect(page.getByRole('alert')).toHaveText('Não existe sala com esse código.');
 });
 
 test('host encerra a sala: todos saem e o código morre', async ({ browser }) => {
@@ -47,7 +46,7 @@ test('host encerra a sala: todos saem e o código morre', async ({ browser }) =>
   const code = await createRoom(host);
   const ana = await person(browser, 'Ana');
   await joinRoom(ana, code);
-  await host.getByRole('navigation', { name: 'Servidores' }).getByRole('button', { name: 'Encerrar sala' }).click();
+  await host.locator('main header').getByRole('button', { name: 'Encerrar sala' }).click();
   await host.getByRole('dialog').getByRole('button', { name: 'Encerrar sala' }).click();
   await expect(ana.getByRole('alert')).toHaveText('A sala foi encerrada pelo host.');
   await ana.getByLabel('Código da sala').fill(code);
@@ -70,10 +69,10 @@ test('expulsar, banir e trancar', async ({ browser }) => {
   const ana = await person(browser, 'Ana');
   await joinRoom(ana, code);
 
-  await memberList(host).getByRole('button', { name: /Ana/ }).click();
+  await (await members(host)).getByRole('button', { name: /Ana/ }).click();
   await host.getByRole('menuitem', { name: 'Banir' }).click();
   await expect(ana.getByRole('alert')).toHaveText('Você foi banido da sala pelo host.');
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 1');
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 1');
 
   await ana.getByLabel('Código da sala').fill(code);
   await ana.getByRole('button', { name: 'Entrar', exact: true }).click();
@@ -81,7 +80,7 @@ test('expulsar, banir e trancar', async ({ browser }) => {
 
   const bia = await person(browser, 'Bia');
   await joinRoom(bia, code);
-  await memberList(host).getByRole('button', { name: /Bia/ }).click();
+  await (await members(host)).getByRole('button', { name: /Bia/ }).click();
   await host.getByRole('menuitem', { name: 'Expulsar' }).click();
   await expect(bia.getByRole('alert')).toHaveText('Você foi expulso da sala pelo host.');
 
@@ -103,5 +102,5 @@ test('convidado que recarrega volta para a sala com o histórico', async ({ brow
   await ana.getByLabel('Código da sala').fill(code);
   await ana.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(ana.getByText('antes de recarregar')).toBeVisible({ timeout: 20_000 });
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 2');
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 2');
 });

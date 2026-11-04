@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { rangeFill } from '../lib/actions';
   import { onMount } from 'svelte';
   import type { RoomSession } from '../lib/session.svelte';
+  import { desktop } from '../lib/platform';
   import { addFromLink, loadYouTube } from '../lib/youtube';
   import Icon from './Icon.svelte';
 
@@ -21,7 +23,6 @@
   const track = $derived(radio.current);
   const youtube = $derived(radio.mode === 'youtube');
   const muted = $derived(session.settings.radioMuted || session.voice.deafened);
-  const voted = $derived(radio.skipVotes.includes(session.selfId));
   const expected = () => radio.position + (radio.paused ? 0 : (performance.now() - session.radioReceivedAt) / 1000);
 
   onMount(() => {
@@ -95,6 +96,48 @@
     else player.unMute();
   });
 
+  const togglePause = () => session.radioShortcut('pause');
+  const skip = () => session.radioShortcut('next');
+
+  // Atalhos no padrão dos outros da sala (Alt+Shift+M muta, Alt+Shift+D ensurdece).
+  // No app de computador eles são globais e chegam pelo processo principal.
+  function shortcut(e: KeyboardEvent) {
+    if (!e.altKey || !e.shiftKey || desktop) return;
+    const action = ({ KeyP: 'pause', KeyN: 'next', ArrowUp: 'up', ArrowDown: 'down' } as const)[e.code as 'KeyP'];
+    if (!action) return;
+    e.preventDefault();
+    session.radioShortcut(action);
+  }
+
+  // Teclas de mídia do teclado e controles do sistema (Windows, macOS, Linux), mesmo com outra janela em foco.
+  $effect(() => {
+    const media = navigator.mediaSession;
+    if (!media || !youtube) return;
+    media.metadata = track ? new MediaMetadata({ title: track.title, artist: `Rádio Discordia · ${track.addedBy}` }) : null;
+    media.playbackState = !track ? 'none' : radio.paused ? 'paused' : 'playing';
+    const handlers: [MediaSessionAction, (() => void) | null][] = [
+      ['play', () => radio.paused && togglePause()],
+      ['pause', () => !radio.paused && togglePause()],
+      ['nexttrack', skip],
+    ];
+    for (const [action, run] of handlers) {
+      try {
+        media.setActionHandler(action, run);
+      } catch {
+        // Ação não suportada neste navegador.
+      }
+    }
+    return () => {
+      for (const [action] of handlers) {
+        try {
+          media.setActionHandler(action, null);
+        } catch {
+          // idem
+        }
+      }
+    };
+  });
+
   function add(e: Event) {
     e.preventDefault();
     if (!link.trim()) return;
@@ -102,6 +145,8 @@
     link = '';
   }
 </script>
+
+<svelte:window onkeydown={shortcut} />
 
 <aside class="radio" aria-label="Rádio">
   <h3><Icon name="music" size={15} /> Rádio <small>{radio.paused ? 'pausado' : 'ao vivo'}</small></h3>
@@ -119,51 +164,50 @@
   <p class="title">{track?.title ?? 'Fila vazia: adicione uma música'}</p>
   {#if track}<small class="by">por {track.addedBy}</small>{/if}
 
-  <div class="row">
-    {#if youtube}
-      <button class="btn" class:mine={voted} disabled={!track} onclick={() => session.radioCmd({ cmd: 'skip' })}>
-        <Icon name="skip" size={16} /> Pular {radio.skipVotes.length}/{radio.needed}
+  {#if youtube}
+    <div class="row controls">
+      <button class="icon" aria-label={radio.paused ? 'Continuar' : 'Pausar'} title="{radio.paused ? 'Continuar' : 'Pausar'} (Alt+Shift+P)" disabled={!track} onclick={togglePause}>
+        <Icon name={radio.paused ? 'play' : 'pause'} size={18} />
       </button>
-    {/if}
-    <button class="icon" aria-label={session.settings.radioMuted ? 'Ativar rádio' : 'Silenciar rádio'} aria-pressed={session.settings.radioMuted} onclick={() => session.updateSettings({ radioMuted: !session.settings.radioMuted })}>
-      <Icon name={session.settings.radioMuted ? 'micOff' : 'voice'} size={18} />
-    </button>
-    <input type="range" min="0" max="1" step="0.05" aria-label="Volume do rádio" value={session.settings.radioVolume} oninput={(e) => session.updateSettings({ radioVolume: Number(e.currentTarget.value) })} />
-  </div>
-
-  {#if session.canControlRadio}
+      <button class="icon" aria-label="Pular música" title="Pular (Alt+Shift+N)" disabled={!track} onclick={skip}><Icon name="skip" size={18} /></button>
+      <button class="icon" class:mine={radio.shuffle} aria-label="Ordem aleatória" aria-pressed={radio.shuffle} title="Ordem aleatória" onclick={() => session.radioCmd({ cmd: 'shuffle' })}><Icon name="shuffle" size={18} /></button>
+      <button class="btn stop" onclick={() => session.radioCmd({ cmd: 'stop' })}>Encerrar</button>
+    </div>
+  {:else}
     <div class="row">
-      {#if youtube}
-        <button class="icon" aria-label={radio.paused ? 'Continuar' : 'Pausar'} onclick={() => session.radioCmd({ cmd: 'pause', paused: !radio.paused })}>
-          <Icon name={radio.paused ? 'play' : 'pause'} size={18} />
-        </button>
-        <button class="icon" aria-label="Pular agora" title="Pular sem votação" onclick={() => session.radioCmd({ cmd: 'force-skip' })}><Icon name="skip" size={18} /></button>
-        <button class="icon" class:mine={radio.shuffle} aria-label="Ordem aleatória" aria-pressed={radio.shuffle} onclick={() => session.radioCmd({ cmd: 'shuffle' })}><Icon name="shuffle" size={18} /></button>
-      {:else}
+      {#if session.canControlRadio}
         <input class="field small" aria-label="O que está tocando" value={track?.title ?? ''} maxlength="120" onchange={(e) => session.radioCmd({ cmd: 'title', title: e.currentTarget.value })} />
       {/if}
       <button class="btn stop" onclick={() => session.radioCmd({ cmd: 'stop' })}>Encerrar</button>
     </div>
   {/if}
 
+  <div class="row">
+    <button class="icon" aria-label={session.settings.radioMuted ? 'Ativar rádio' : 'Silenciar rádio'} aria-pressed={session.settings.radioMuted} onclick={() => session.updateSettings({ radioMuted: !session.settings.radioMuted })}>
+      <Icon name={session.settings.radioMuted ? 'micOff' : 'voice'} size={18} />
+    </button>
+    <input type="range" use:rangeFill={session.settings.radioVolume} min="0" max="1" step="0.05" aria-label="Volume do rádio" title="Volume (Alt+Shift+↑ / ↓)" value={session.settings.radioVolume} oninput={(e) => session.updateSettings({ radioVolume: Number(e.currentTarget.value) })} />
+  </div>
+
   {#if youtube}
     <form onsubmit={add}>
-      <input class="field small" aria-label="Adicionar música" placeholder="Link do YouTube" bind:value={link} autocomplete="off" />
+      <input class="field small" aria-label="Adicionar música" placeholder="Link do YouTube: toca a seguir" bind:value={link} autocomplete="off" />
       <button class="icon" aria-label="Adicionar à fila"><Icon name="plus" size={18} /></button>
     </form>
 
-    <span class="next">A seguir — {radio.queue.length}</span>
+    <span class="next">A seguir — {radio.queue.length} <small>· a fila repete</small></span>
     <ol>
-      {#each radio.queue as item (item.id)}
+      {#each radio.queue as item, i (item.id)}
         <li>
           <span class="name">{item.title}<small>{item.addedBy}</small></span>
-          <button class="vote" class:mine={item.votes.includes(session.selfId)} aria-label="Votar em {item.title}" onclick={() => session.radioCmd({ cmd: 'vote', id: item.id })}>▲ {item.votes.length}</button>
-          {#if session.canControlRadio || item.addedBy === session.me?.name}
-            <button class="icon" aria-label="Remover {item.title}" onclick={() => session.radioCmd({ cmd: 'remove', id: item.id })}><Icon name="close" size={14} /></button>
+          {#if i > 0}
+            <button class="icon up" aria-label="Tocar a seguir: {item.title}" title="Tocar a seguir" onclick={() => session.radioCmd({ cmd: 'up', id: item.id })}>↑</button>
           {/if}
+          <button class="icon" aria-label="Remover {item.title}" onclick={() => session.radioCmd({ cmd: 'remove', id: item.id })}><Icon name="close" size={14} /></button>
         </li>
       {/each}
     </ol>
+    <small class="keys">Atalhos: Alt+Shift+P pausa · N pula · ↑↓ volume. As teclas de mídia do teclado também funcionam.</small>
   {/if}
 </aside>
 
@@ -302,17 +346,23 @@
     color: var(--text-mute);
   }
 
-  .vote {
-    flex: none;
-    padding: 2px 6px;
-    border-radius: 999px;
-    background: var(--bg-main);
-    font-size: 12px;
-    transition: background 0.12s;
+  .icon:disabled {
+    opacity: 0.4;
   }
 
-  .vote:hover {
-    background: var(--bg-hover);
+  .up {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .next small {
+    font-weight: 400;
+    text-transform: none;
+  }
+
+  .keys {
+    color: var(--text-mute);
+    font-size: 11px;
   }
 
   .eq {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { RoomHost } from '../src/lib/host';
+import { RoomHost, cleanProfile } from '../src/lib/host';
 import { LIMITS, emptyVoice, type HostMsg, type VoiceState } from '../src/lib/protocol';
 
 const profile = (name: string) => ({ name, avatar: '', color: '#123456' });
@@ -93,24 +93,42 @@ describe('RoomHost', () => {
       t.host.admit('c', profile('Caio'), 'c-c');
       radio('c', { cmd: 'skip' });
       radio('c', { cmd: 'add', tracks: [song(4)] });
-      expect(t.host.radio!.skipVotes).toEqual([]);
+      radio('c', { cmd: 'stop' });
+      expect(t.host.radio!.current!.title).toBe('Música 1');
       expect(t.host.radio!.queue).toHaveLength(2);
     });
 
-    it('pular exige maioria e o voto pode ser retirado', () => {
+    const titles = () => [t.host.radio!.current!.title, ...t.host.radio!.queue.map((x) => x.title)];
+
+    it('música que termina volta para o fim da fila', () => {
       radio('b', { cmd: 'skip' });
-      radio('b', { cmd: 'skip' });
-      radio('b', { cmd: 'skip' });
-      expect(t.host.radio!.current!.title).toBe('Música 1');
-      radio('h', { cmd: 'skip' });
-      expect(t.host.radio!.current!.title).toBe('Música 2');
-      expect(t.host.radio!.skipVotes).toEqual([]);
+      expect(titles()).toEqual(['Música 2', 'Música 3', 'Música 1']);
+      radio('a', { cmd: 'ended', id: t.host.radio!.current!.id });
+      radio('a', { cmd: 'ended', id: t.host.radio!.current!.id });
+      expect(titles()).toEqual(['Música 1', 'Música 2', 'Música 3']);
     });
 
-    it('música mais votada passa na frente', () => {
-      radio('b', { cmd: 'vote', id: t.host.radio!.queue[1].id });
-      radio('a', { cmd: 'force-skip' });
-      expect(t.host.radio!.current!.title).toBe('Música 3');
+    it('com uma música só, ela repete', () => {
+      for (const item of [...t.host.radio!.queue]) radio('b', { cmd: 'remove', id: item.id });
+      const first = t.host.radio!.current!.id;
+      radio('a', { cmd: 'ended', id: first });
+      expect(t.host.radio!.current!.title).toBe('Música 1');
+      // Aviso atrasado da volta anterior não pula a repetição.
+      radio('b', { cmd: 'ended', id: first });
+      expect(t.host.radio!.current!.id).not.toBe(first);
+      expect(t.host.radio!.queue).toHaveLength(0);
+    });
+
+    it('música nova entra no topo, na ordem em que veio', () => {
+      radio('b', { cmd: 'add', tracks: [song(4), song(5)] });
+      expect(titles()).toEqual(['Música 1', 'Música 4', 'Música 5', 'Música 2', 'Música 3']);
+      radio('b', { cmd: 'skip' });
+      expect(t.host.radio!.current!.title).toBe('Música 4');
+    });
+
+    it('tocar a seguir leva a música para o topo', () => {
+      radio('b', { cmd: 'up', id: t.host.radio!.queue[1].id });
+      expect(titles()).toEqual(['Música 1', 'Música 3', 'Música 2']);
     });
 
     it('vários avisos de fim avançam uma faixa só', () => {
@@ -121,16 +139,26 @@ describe('RoomHost', () => {
       expect(t.host.radio!.current!.title).toBe('Música 2');
     });
 
-    it('só DJ e host controlam pausa e parada', () => {
+    it('qualquer um no canal pausa, pula, embaralha, remove e encerra', () => {
       radio('b', { cmd: 'pause', paused: true });
-      expect(t.host.radio!.paused).toBe(false);
+      expect(t.host.radio!.paused).toBe(true);
+      radio('b', { cmd: 'shuffle' });
+      expect(t.host.radio!.shuffle).toBe(true);
+      radio('b', { cmd: 'remove', id: t.host.radio!.queue[0].id });
+      expect(t.host.radio!.queue).toHaveLength(1);
+      radio('b', { cmd: 'skip' });
+      expect(t.host.radio!.current!.title).toBe('Música 3');
       radio('b', { cmd: 'stop' });
-      expect(t.host.radio).not.toBeNull();
-      radio('a', { cmd: 'pause', paused: true });
-      t.tick(5000);
-      expect(t.host.radioView()!.position).toBe(0);
-      radio('h', { cmd: 'stop' });
       expect(t.host.radio).toBeNull();
+    });
+
+    it('aleatório nunca repete na hora a que acabou de tocar', () => {
+      radio('a', { cmd: 'shuffle' });
+      for (let i = 0; i < 20; i++) {
+        const before = t.host.radio!.current!.title;
+        radio('a', { cmd: 'skip' });
+        expect(t.host.radio!.current!.title).not.toBe(before);
+      }
     });
 
     it('posição continua de onde pausou', () => {
@@ -148,14 +176,6 @@ describe('RoomHost', () => {
       t.host.handle('h', { t: 'voice', state: voice(null) });
       t.host.handle('b', { t: 'voice', state: voice(null) });
       expect(t.host.radio).toBeNull();
-    });
-
-    it('quem saiu perde o voto e a maioria é recalculada', () => {
-      radio('b', { cmd: 'skip' });
-      t.host.handle('h', { t: 'voice', state: voice(null) });
-      expect(t.host.radio!.current!.title).toBe('Música 1');
-      radio('a', { cmd: 'skip' });
-      expect(t.host.radio!.current!.title).toBe('Música 2');
     });
 
     it('rádio de aba acaba quando a DJ sai', () => {
@@ -228,6 +248,14 @@ describe('RoomHost', () => {
       t.host.handle('h', { t: 'mod', mod: { action: 'lock', locked: true } });
       t.host.admit('a2', profile('Ana'), 'c-a');
       expect(t.host.members.has('a2')).toBe(false);
+    });
+
+    it('duas abas do mesmo navegador são pessoas diferentes', () => {
+      t.host.admit('x', profile('Aba 1'), 'pc', 'aba-1');
+      t.host.admit('y', profile('Aba 2'), 'pc', 'aba-2');
+      expect(t.host.members.has('x') && t.host.members.has('y')).toBe(true);
+      t.host.admit('z', profile('Aba 1'), 'pc', 'aba-1'); // a mesma aba reconectando
+      expect(t.host.members.has('x')).toBe(false);
     });
 
     it('um id só é retomado pelo cliente dono dele', () => {
@@ -337,5 +365,14 @@ describe('RoomHost', () => {
     const stored = t.host.history.get('geral')!.filter((m) => m.attachment);
     expect(stored[0].attachment!.data).toBeNull();
     expect(stored.at(-1)!.attachment!.data).not.toBeNull();
+  });
+});
+
+describe('perfil', () => {
+  it('leva a chave de amigo válida e descarta qualquer outra coisa', () => {
+    const key = 'A'.repeat(87);
+    expect(cleanProfile({ name: 'Ana', avatar: '', color: '#123456', friend: key }).friend).toBe(key);
+    expect(cleanProfile({ name: 'Ana', avatar: '', color: '#123456', friend: '<script>' }).friend).toBeUndefined();
+    expect(cleanProfile({ name: 'Ana', avatar: '', color: '#123456', friend: 'A'.repeat(200) }).friend).toBeUndefined();
   });
 });

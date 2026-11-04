@@ -10,6 +10,8 @@ describe('código de sala', () => {
   it('aceita digitação com hífen, espaço e minúsculas', () => {
     expect(normalizeCode('ab7-k2q')).toBe('AB7K2Q');
     expect(normalizeCode(' AB7 K2Q ')).toBe('AB7K2Q');
+    expect(normalizeCode('https://discordia.vercel.app/#AB7-K2Q')).toBe('AB7K2Q');
+    expect(normalizeCode('discordia://AB7-K2Q')).toBeNull();
   });
 
   it('recusa tamanho errado e símbolos ambíguos', () => {

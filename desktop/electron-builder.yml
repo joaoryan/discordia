@@ -1,0 +1,51 @@
+# Empacotamento do app de computador. Rode da raiz: npm run desktop:dist
+appId: app.discordia.desktop
+productName: Discordia
+copyright: Discordia
+directories:
+  output: desktop/release
+  buildResources: desktop/build
+files:
+  - package.json
+  - dist/**
+  - desktop/package.json
+  - desktop/dist/**
+  - desktop/static/**
+  - desktop/build/icon.png
+  - desktop/build/tray.png
+  - "!**/*.map"
+extraMetadata:
+  main: desktop/dist/main.js
+# O hook de teclado usa N-API e já vem compilado para Windows, macOS e Linux: nada para recompilar.
+npmRebuild: false
+# Por ser nativo, fica fora do asar para o sistema conseguir carregá-lo.
+asarUnpack:
+  - node_modules/uiohook-napi/**
+protocols:
+  - name: Discordia
+    schemes:
+      - discordia
+win:
+  target: nsis
+  icon: desktop/build/icon.png
+nsis:
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: true
+mac:
+  target: dmg
+  category: public.app-category.social-networking
+  icon: desktop/build/icon.png
+  hardenedRuntime: true
+  extendInfo:
+    NSMicrophoneUsageDescription: O Discordia usa o microfone para a sua voz nas chamadas.
+    NSCameraUsageDescription: O Discordia usa a câmera quando você a liga numa chamada.
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Network
+  icon: desktop/build/icon.png
+  maintainer: Discordia
+publish:
+  provider: github

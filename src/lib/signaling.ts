@@ -2,6 +2,9 @@
 // convidado fecha assim que o canal P2P abre.
 
 const BASE: string = import.meta.env.VITE_SIGNAL_URL ?? location.origin;
+
+/** Endereço WebSocket do Worker, para outras conexões além da sala (caixa de entrada). */
+export const signalSocketUrl = (path: string) => `${BASE.replace(/^http/, 'ws')}${path}`;
 const KEEPALIVE_MS = 30_000;
 const FALLBACK_ICE: RTCIceServer[] = [{ urls: 'stun:stun.cloudflare.com:3478' }];
 

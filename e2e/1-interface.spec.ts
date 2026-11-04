@@ -6,10 +6,7 @@ test('primeiro acesso, sala do host e responsividade', async ({ browser }) => {
   await expect(page.getByRole('heading', { name: 'Discordia', exact: true })).toBeVisible();
   await page.screenshot({ path: `${shots}/1-inicio.png` });
 
-  await page.getByRole('radio', { name: 'Tema Miami Neon' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'miami');
   await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'miami');
   await expect(page.getByRole('button', { name: 'Criar sala' })).toBeVisible(); // perfil persistiu
 
   await createRoom(page);

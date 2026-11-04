@@ -17,7 +17,7 @@
   --accent: #f7b23b;
   --accent-rgb: 247 178 59;
   --violet-rgb: 143 115 242;
-  --logo-bg: #241c33;
+  --logo-bg: #1d1729;
   --accent-strong: #ffc95e;
   --gold: linear-gradient(135deg, #ffdc82, #f5a623);
   --violet: #8f73f2;
@@ -27,76 +27,6 @@
   --radius: 10px;
   --shadow: 0 12px 32px rgb(0 0 0 / 40%);
   --font: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-}
-
-[data-theme='miami'] {
-  --bg-deep: #140a1f;
-  --bg-rail: #12081c;
-  --bg-side: #1c0f2b;
-  --bg-panel: #170c24;
-  --bg-main: #24122f;
-  --bg-input: #331c42;
-  --bg-hover: #2e1a3d;
-  --bg-active: #3b2350;
-  --bg-float: #12091b;
-  --text: #fff0f8;
-  --text-soft: #d3bcd2;
-  --text-mute: #9c85a3;
-  --accent: #ff4fa3;
-  --accent-rgb: 255 79 163;
-  --accent-strong: #ff7cbc;
-  --gold: linear-gradient(135deg, #ff4fa3, #ffa14a);
-  --violet: #2ce0e6;
-  --violet-rgb: 44 224 230;
-  --on-accent: #1c0614;
-  --logo-bg: #2a123d;
-}
-
-[data-theme='tactical'] {
-  --bg-deep: #0b0e0b;
-  --bg-rail: #0d100d;
-  --bg-side: #141914;
-  --bg-panel: #101410;
-  --bg-main: #1a201a;
-  --bg-input: #262d25;
-  --bg-hover: #242b23;
-  --bg-active: #2f382e;
-  --bg-float: #0e120e;
-  --text: #eef1e8;
-  --text-soft: #b8bfae;
-  --text-mute: #858d7c;
-  --accent: #f2711c;
-  --accent-rgb: 242 113 28;
-  --accent-strong: #ff9a3c;
-  --gold: linear-gradient(135deg, #ff9a3c, #e8590c);
-  --violet: #8aa35f;
-  --violet-rgb: 138 163 95;
-  --on-accent: #1c0c02;
-  --radius: 6px;
-  --logo-bg: #1d251b;
-}
-
-[data-theme='fantasy'] {
-  --bg-deep: #0a0f1e;
-  --bg-rail: #0b1122;
-  --bg-side: #111a30;
-  --bg-panel: #0d1528;
-  --bg-main: #16213c;
-  --bg-input: #22304f;
-  --bg-hover: #1f2c49;
-  --bg-active: #2a3a5e;
-  --bg-float: #0b1224;
-  --text: #eef3ff;
-  --text-soft: #b5c2dc;
-  --text-mute: #8291b0;
-  --accent: #e8c15a;
-  --accent-rgb: 232 193 90;
-  --accent-strong: #f5d67e;
-  --gold: linear-gradient(135deg, #f5d67e, #c9962e);
-  --violet: #4da8ff;
-  --violet-rgb: 77 168 255;
-  --on-accent: #201703;
-  --logo-bg: #1a2a50;
 }
 
 * {
@@ -207,6 +137,201 @@ button:disabled {
   text-transform: uppercase;
 }
 
+/* Caixas de seleção próprias: o <input> continua lá (teclado, leitor de tela), só o desenho muda. */
+input[type='checkbox'],
+input[type='radio'] {
+  display: inline-grid;
+  flex: none;
+  place-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 1.5px solid var(--text-mute);
+  border-radius: 5px;
+  background: var(--bg-deep);
+  vertical-align: -4px;
+  cursor: pointer;
+  appearance: none;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+
+input[type='radio'] {
+  border-radius: 50%;
+}
+
+input[type='checkbox']::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  background: var(--on-accent);
+  clip-path: polygon(12% 48%, 0 62%, 40% 100%, 100% 22%, 87% 9%, 39% 72%);
+  transform: scale(0);
+  transition: transform 0.12s ease-out;
+}
+
+input[type='radio']::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--on-accent);
+  transform: scale(0);
+  transition: transform 0.12s ease-out;
+}
+
+input[type='checkbox']:checked,
+input[type='radio']:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+input[type='checkbox']:checked::before,
+input[type='radio']:checked::before {
+  transform: scale(1);
+}
+
+input[type='checkbox']:hover:not(:disabled),
+input[type='radio']:hover:not(:disabled) {
+  border-color: var(--text-soft);
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 5%);
+}
+
+input[type='checkbox']:checked:hover:not(:disabled),
+input[type='radio']:checked:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 16%);
+}
+
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Interruptor: a mesma caixa de seleção, para opções que ligam e desligam algo. */
+input[type='checkbox'].switch {
+  justify-content: start;
+  width: 36px;
+  height: 21px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--bg-active);
+}
+
+input[type='checkbox'].switch::before {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #d9d5e3;
+  clip-path: none;
+  transform: none;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+  transition: transform 0.16s ease-out, background 0.16s;
+}
+
+input[type='checkbox'].switch:checked {
+  background: var(--accent);
+}
+
+input[type='checkbox'].switch:checked::before {
+  background: #fff;
+  transform: translateX(15px);
+}
+
+/* Slider: trilho preenchido até o valor (--fill vem da ação rangeFill). */
+input[type='range'] {
+  --fill: 50%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(var(--accent), var(--accent)) 0 / var(--fill) 100% no-repeat, var(--bg-active);
+}
+
+input[type='range']::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
+  appearance: none;
+  transition: box-shadow 0.12s, transform 0.12s;
+}
+
+input[type='range']:hover::-webkit-slider-thumb,
+input[type='range']:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px rgb(var(--accent-rgb) / 22%), 0 1px 4px rgb(0 0 0 / 45%);
+}
+
+input[type='range']:active::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+
+input[type='range']::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-active);
+}
+
+input[type='range']::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
+}
+
+input[type='range']:focus-visible {
+  outline: none;
+}
+
+/* Linha com rótulo e controle, usada nas listas de opções. */
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.option-row > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.option-row small {
+  display: block;
+  color: var(--text-mute);
+  font-size: 12.5px;
+}
+
+.badge-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -226,6 +351,12 @@ button:disabled {
 
 ::selection {
   background: rgb(var(--accent-rgb) / 35%);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
 }
 
 @keyframes pop-in {

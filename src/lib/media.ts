@@ -1,5 +1,6 @@
 // Áudio, vídeo e tela em malha. Cada par só existe enquanto os dois estão no mesmo canal de voz.
 import { LIMITS } from './protocol';
+import { MicChain, createVoiceContext, type MicOptions, type MicState } from './micChain';
 import type { Settings } from './settings';
 
 export type ScreenQuality = 'detail' | 'motion' | 'full'; // | 'high'
@@ -15,7 +16,6 @@ export const SCREEN = {
 
 const MIC_RETRY_MS = 600;
 const MUSIC_BITRATE = 128_000;
-const METER_MS = 150;
 
 // Upload total é N-1 × bitrate, então o vídeo perde qualidade conforme a sala cresce.
 function cameraEncoding(peers: number, lite: boolean): RTCRtpEncodingParameters {
@@ -193,10 +193,13 @@ export class MediaEngine {
   private asked = new Map<string, boolean>(); // o que este lado já pediu a cada par
   private screenPreset: (typeof SCREEN)[ScreenQuality] = SCREEN.detail;
   private audio: AudioContext | null = null;
-  private meterSource: MediaStreamAudioSourceNode | null = null;
-  private meter = 0;
+  /** Captura crua do dispositivo; `mic` é o que vai para a rede (tratado, se possível). */
+  private micRaw: MediaStream | null = null;
+  private chain: MicChain | null = null;
+  /** Nível da voz antes da porta, para o medidor das configurações. */
+  micLevel = 0;
+  private gateOpen = false;
   private isSpeaking = false;
-  private lastLoud = 0;
   private muted = false;
   private micToken = 0;
   private micQueue: Promise<unknown> = Promise.resolve();
@@ -214,8 +217,20 @@ export class MediaEngine {
         echoCancellation: s.echoCancellation,
         noiseSuppression: s.noiseSuppression,
         autoGainControl: s.autoGainControl,
+        channelCount: 1,
+        sampleRate: 48_000,
       },
     };
+  }
+
+  private micOptions(): MicOptions {
+    const s = this.settings();
+    return { voiceIsolation: s.voiceIsolation, noiseGate: s.noiseGate, threshold: s.sensitivity, volume: s.micVolume };
+  }
+
+  /** Volume, porta e sensibilidade valem na hora, sem reabrir o microfone. */
+  updateMicOptions() {
+    this.chain?.update(this.micOptions());
   }
 
   /** `exact`: com `ideal` o navegador pode ignorar a escolha e seguir no dispositivo antigo. */
@@ -243,25 +258,72 @@ export class MediaEngine {
     }
   }
 
-  private attachMic(stream: MediaStream) {
-    const track = stream.getAudioTracks()[0];
+  private async buildChain(raw: MediaStream) {
+    if (!this.audio) {
+      this.audio = createVoiceContext();
+      this.audio.onstatechange = () => this.syncMicOutput();
+    }
+    void this.audio.resume();
+    try {
+      return await MicChain.create(this.audio, raw, this.micOptions(), (s) => this.onMicState(s));
+    } catch (err) {
+      // Navegador sem AudioWorklet ou taxa de amostragem incompatível: envia sem tratamento.
+      console.warn('tratamento de voz indisponível', err);
+      return null;
+    }
+  }
+
+  /** Depois do F5 o AudioContext pode nascer suspenso: até liberar, envia o som sem tratamento. */
+  private micOutput() {
+    return this.chain && this.audio?.state === 'running' ? this.chain.output : this.micRaw;
+  }
+
+  private attachMic(raw: MediaStream, chain: MicChain | null) {
+    const track = raw.getAudioTracks()[0];
     // Fone desconectado encerra a trilha em silêncio: sem isto a pessoa some sem saber.
     track.onended = () => {
-      if (this.mic?.getAudioTracks()[0] === track) void this.switchMic(true);
+      if (this.micRaw?.getAudioTracks()[0] === track) void this.switchMic(true);
     };
-    this.mic = stream;
+    this.micRaw = raw;
+    this.chain = chain;
+    this.mic = this.micOutput();
     this.applyMuted();
-    this.startMeter();
     this.events.micChanged();
+  }
+
+  private syncMicOutput() {
+    const next = this.micOutput();
+    const current = this.mic;
+    if (!next || !current || next === current) return;
+    void this.swapMicTrack(current.getAudioTracks()[0], next.getAudioTracks()[0]);
+    this.mic = next;
+    this.applyMuted();
+    this.events.micChanged();
+  }
+
+  private swapMicTrack(previous: MediaStreamTrack, track: MediaStreamTrack | null) {
+    const pending: Promise<void>[] = [];
+    for (const map of this.senders.values()) {
+      const sender = map.get(previous);
+      if (!sender) continue;
+      pending.push(sender.replaceTrack(track));
+      map.delete(previous);
+      if (track) map.set(track, sender);
+    }
+    return Promise.all(pending);
   }
 
   async startMic() {
     const token = ++this.micToken;
-    const stream = await this.openMic();
+    const raw = await this.openMic();
+    const chain = await this.buildChain(raw);
     // A pessoa saiu da voz enquanto o navegador abria o microfone.
-    if (token !== this.micToken) return stream.getTracks().forEach((t) => t.stop());
-    this.attachMic(stream);
-    for (const id of this.peers.keys()) this.publish(id, stream);
+    if (token !== this.micToken) {
+      chain?.close();
+      return raw.getTracks().forEach((t) => t.stop());
+    }
+    this.attachMic(raw, chain);
+    for (const id of this.peers.keys()) this.publish(id, this.mic!);
   }
 
   /** Troca o microfone em uso sem derrubar as conexões. Trocas rápidas entram em fila. */
@@ -274,7 +336,9 @@ export class MediaEngine {
 
   private async replaceMic(lost: boolean) {
     const old = this.mic;
-    if (!old) return;
+    const oldRaw = this.micRaw;
+    const oldChain = this.chain;
+    if (!old || !oldRaw) return;
     const previous = old.getAudioTracks()[0];
     const token = this.micToken;
     let next: MediaStream;
@@ -282,38 +346,36 @@ export class MediaEngine {
       next = await this.openMic();
     } catch (err) {
       // Alguns headsets USB só abrem uma vez: solta o antigo e tenta de novo.
-      old.getTracks().forEach((t) => t.stop());
+      oldRaw.getTracks().forEach((t) => t.stop());
       try {
         next = await this.openMic();
       } catch {
         if (token !== this.micToken) return;
-        this.mic = null;
-        clearInterval(this.meter);
-        for (const map of this.senders.values()) {
-          await map.get(previous)?.replaceTrack(null);
-        }
+        oldChain?.close();
+        this.mic = this.micRaw = this.chain = null;
+        this.gateOpen = false;
+        this.updateSpeaking();
+        await this.swapMicTrack(previous, null);
         this.events.micLost();
         if (lost) return;
         throw err;
       }
     }
-    if (token !== this.micToken) return next.getTracks().forEach((t) => t.stop());
-    const track = next.getAudioTracks()[0];
-    for (const map of this.senders.values()) {
-      const sender = map.get(previous);
-      if (!sender) continue;
-      await sender.replaceTrack(track);
-      map.delete(previous);
-      map.set(track, sender);
+    const chain = await this.buildChain(next);
+    if (token !== this.micToken) {
+      chain?.close();
+      return next.getTracks().forEach((t) => t.stop());
     }
-    previous.onended = null;
-    old.getTracks().forEach((t) => t.stop());
-    this.attachMic(next);
+    oldRaw.getAudioTracks()[0].onended = null;
+    this.attachMic(next, chain);
+    await this.swapMicTrack(previous, this.mic!.getAudioTracks()[0]);
+    oldChain?.close();
+    oldRaw.getTracks().forEach((t) => t.stop());
   }
 
   /** Grupo do microfone em uso, para notar quando o padrão do sistema mudar. */
   get micGroup() {
-    return this.mic?.getAudioTracks()[0]?.getSettings().groupId ?? null;
+    return this.micRaw?.getAudioTracks()[0]?.getSettings().groupId ?? null;
   }
 
   resumeAudio() {
@@ -328,35 +390,23 @@ export class MediaEngine {
   private applyMuted() {
     // Só desabilita a trilha: é instantâneo e não exige renegociar.
     this.mic?.getAudioTracks().forEach((t) => (t.enabled = !this.muted));
+    // O tratamento lê a trilha crua, que precisa seguir ligada quando não é ela que vai para a rede.
+    if (this.micRaw !== this.mic) this.micRaw?.getAudioTracks().forEach((t) => (t.enabled = true));
+    this.updateSpeaking();
   }
 
-  // Mede o próprio microfone e avisa os outros, em vez de analisar cada áudio recebido.
-  private startMeter() {
-    clearInterval(this.meter);
-    this.meterSource?.disconnect();
-    if (!this.mic) return;
-    this.audio ??= new AudioContext();
-    void this.audio.resume();
-    const analyser = this.audio.createAnalyser();
-    analyser.fftSize = 256;
-    this.meterSource = this.audio.createMediaStreamSource(this.mic);
-    this.meterSource.connect(analyser);
-    const samples = new Float32Array(analyser.fftSize);
+  // A porta de voz já mede o próprio microfone; os outros só recebem o aviso.
+  private onMicState(state: MicState) {
+    this.micLevel = state.level;
+    this.gateOpen = state.open;
+    this.updateSpeaking();
+  }
 
-    this.meter = window.setInterval(() => {
-      const now = performance.now();
-      if (!this.muted) {
-        analyser.getFloatTimeDomainData(samples);
-        let sum = 0;
-        for (const v of samples) sum += v * v;
-        if (Math.sqrt(sum / samples.length) > this.settings().sensitivity) this.lastLoud = now;
-      }
-      const speaking = now - this.lastLoud < 350;
-      if (speaking !== this.isSpeaking) {
-        this.isSpeaking = speaking;
-        this.events.speaking(speaking);
-      }
-    }, METER_MS);
+  private updateSpeaking() {
+    const speaking = this.gateOpen && !this.muted && this.mic !== null;
+    if (speaking === this.isSpeaking) return;
+    this.isSpeaking = speaking;
+    this.events.speaking(speaking);
   }
 
   /** Ajusta a malha para conter exatamente estas pessoas. */
@@ -681,19 +731,18 @@ export class MediaEngine {
 
   stopAll() {
     this.micToken++; // cancela aberturas e trocas de microfone em andamento
-    clearInterval(this.meter);
-    this.meterSource?.disconnect();
-    this.meterSource = null;
     this.syncPeers([]);
-    for (const stream of [this.mic, this.camera, this.screen, this.radio]) {
+    this.chain?.close();
+    for (const stream of [this.micRaw, this.mic, this.camera, this.screen, this.radio]) {
       stream?.getTracks().forEach((t) => {
         t.onended = null;
         t.stop();
       });
     }
-    this.mic = this.camera = this.screen = this.radio = null;
+    this.mic = this.micRaw = this.chain = this.camera = this.screen = this.radio = null;
     this.watchers.clear();
-    this.isSpeaking = false;
+    this.gateOpen = this.isSpeaking = false;
+    this.micLevel = 0;
     void this.audio?.close();
     this.audio = null;
   }

@@ -1,8 +1,8 @@
 // Perfil e preferências ficam só neste navegador.
 import type { Profile } from './protocol';
-import type { ThemeId } from './theme';
+import type { SoundId } from './sounds';
 
-const KEYS = { profile: 'discordia.profile', settings: 'discordia.settings', client: 'discordia.client', recent: 'discordia.recent' };
+const KEYS = { profile: 'discordia.profile', settings: 'discordia.settings', client: 'discordia.client', recent: 'discordia.recent', tab: 'discordia.tab' };
 
 /** Ajustes que valem só para quem os fez; ninguém mais fica sabendo. */
 export interface UserAudio {
@@ -21,8 +21,16 @@ export interface Settings {
   echoCancellation: boolean;
   noiseSuppression: boolean;
   autoGainControl: boolean;
+  /** Supressão de ruído por IA (RNNoise): deixa passar só a voz. */
+  voiceIsolation: boolean;
+  /** Corta o envio enquanto a pessoa não fala, usando `sensitivity` como limite. */
+  noiseGate: boolean;
+  micVolume: number;
   sensitivity: number;
   sounds: boolean;
+  soundVolume: number;
+  /** Sons que a pessoa desligou um a um. */
+  mutedSounds: SoundId[];
   notifications: boolean;
   pushToTalk: boolean;
   pushToTalkKey: string;
@@ -31,8 +39,9 @@ export interface Settings {
   radioMuted: boolean;
   lite: boolean;
   gameMode: boolean;
-  theme: ThemeId;
   metrics: boolean;
+  /** App de computador: mini janela por cima dos outros programas durante a chamada. */
+  miniWindow: boolean;
 }
 
 export const defaultSettings: Settings = {
@@ -42,8 +51,13 @@ export const defaultSettings: Settings = {
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true,
+  voiceIsolation: true,
+  noiseGate: true,
+  micVolume: 1,
   sensitivity: 0.02,
   sounds: true,
+  soundVolume: 0.8,
+  mutedSounds: [],
   notifications: false,
   pushToTalk: false,
   pushToTalkKey: 'KeyV',
@@ -52,8 +66,8 @@ export const defaultSettings: Settings = {
   radioMuted: false,
   lite: false,
   gameMode: false,
-  theme: 'discordia',
   metrics: false,
+  miniWindow: true,
 };
 
 function read<T>(key: string): T | null {
@@ -85,6 +99,20 @@ export function clientId() {
     write(KEYS.client, id);
   }
   return id;
+}
+
+/** Cada aba é uma pessoa na sala; sessionStorage sobrevive ao F5, mas não é dividido entre abas. */
+export function tabId() {
+  try {
+    let id = sessionStorage.getItem(KEYS.tab);
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem(KEYS.tab, id);
+    }
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
 }
 
 export interface RecentRoom {

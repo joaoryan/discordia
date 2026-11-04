@@ -32,6 +32,8 @@ test('Chromium e Firefox na mesma sala, com o Firefox como convidado e como host
     });
     await expect.poll(() => inbound(cr), { timeout: 20_000 }).toBeGreaterThan(1000);
     await expect.poll(() => inbound(fx), { timeout: 20_000 }).toBeGreaterThan(1000);
+    // O tratamento de voz também roda no Firefox, e é a saída dele que vai para a rede.
+    expect(await fx.evaluate(() => { const m = (window as any).session.media; return Boolean(m.chain) && m.mic !== m.micRaw; })).toBe(true);
 
     await fx.getByRole('button', { name: 'Ligar câmera' }).click();
     await expect(cr.locator('[data-label="Fox"] video')).toBeVisible({ timeout: 15_000 });

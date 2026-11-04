@@ -28,7 +28,7 @@ test('voz em malha entre três pessoas, mudo e ensurdecer', async ({ browser }) 
   await expect(host.locator('.voice-member .speaking').first()).toBeVisible({ timeout: 10_000 });
   await host.screenshot({ path: `${shots}/4-voz.png` });
 
-  await ana.getByRole('complementary').first().getByRole('button', { name: 'Silenciar microfone' }).click();
+  await ana.getByRole('button', { name: 'Silenciar microfone' }).click();
   await expect(host.locator('.voice-member').filter({ hasText: 'Ana' }).locator('svg')).toHaveCount(1);
   expect(await ana.evaluate(() => (window as any).session.media.mic.getAudioTracks()[0].enabled)).toBe(false);
 
@@ -52,6 +52,21 @@ test('quem está em outro canal de voz não entra na malha', async ({ browser })
   await expect(host.locator('.voice-member')).toHaveCount(2);
   await host.waitForTimeout(800);
   expect(Object.keys(await stats(host))).toHaveLength(0);
+});
+
+test('trocar de canal mantém o microfone e a voz com quem está lá', async ({ browser }) => {
+  const host = await person(browser, 'Host');
+  const code = await createRoom(host);
+  const ana = await person(browser, 'Ana');
+  await joinRoom(ana, code);
+  await host.getByRole('button', { name: 'Jogos', exact: true }).click();
+  await ana.getByRole('button', { name: 'Saguão', exact: true }).click();
+  await expect(host.locator('.voice-member')).toHaveCount(2);
+
+  await ana.getByRole('button', { name: 'Jogos', exact: true }).first().click();
+  await expect.poll(async () => Object.values(await stats(host)).map((s: any) => s.state).join(), { timeout: 15_000 }).toBe('connected');
+  expect(await ana.evaluate(() => (window as any).session.media.mic?.getAudioTracks()[0].readyState)).toBe('live');
+  await expect.poll(async () => (await receivedFrom(host))[0] ?? 0, { timeout: 10_000 }).toBeGreaterThan(1000);
 });
 
 test('sem microfone a pessoa entra apenas ouvindo', async ({ browser }) => {
@@ -78,7 +93,10 @@ test('configurações listam dispositivos e medem o microfone', async ({ browser
   const page = await person(browser, 'Ana');
   await createRoom(page);
   await page.getByRole('button', { name: 'Configurações' }).click();
-  await expect(page.getByLabel('Microfone', { exact: true })).toContainText('Fake');
+  await page.getByRole('combobox', { name: 'Microfone', exact: true }).click();
+  await expect(page.getByRole('listbox')).toContainText('Fake');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Configurações' })).toBeVisible(); // Esc fechou só a lista
   // O microfone falso só bipa: observa o pico em vez de torcer para amostrar no bipe.
   const peak = await page.getByRole('meter').evaluate((el) => new Promise<number>((resolve) => {
     let max = 0;
@@ -87,4 +105,38 @@ test('configurações listam dispositivos e medem o microfone', async ({ browser
   }));
   expect(peak).toBeGreaterThan(0);
   await page.screenshot({ path: `${shots}/4-config.png` });
+});
+
+test('a voz enviada passa pelo tratamento e os ajustes valem na hora', async ({ browser }) => {
+  const host = await person(browser, 'Host');
+  const code = await createRoom(host);
+  const ana = await person(browser, 'Ana');
+  await joinRoom(ana, code);
+  for (const page of [host, ana]) await page.getByRole('button', { name: 'Saguão', exact: true }).click();
+  await expect.poll(async () => Object.values(await stats(ana)).map((s: any) => s.state).join(), { timeout: 20_000 }).toBe('connected');
+
+  // O que vai para a rede é a saída do tratamento, não a captura crua.
+  const processed = () => ana.evaluate(() => {
+    const media = (window as any).session.media;
+    const [peer] = media.peers.values();
+    const sent = peer.pc.getSenders().find((s: RTCRtpSender) => s.track?.kind === 'audio')?.track;
+    return Boolean(media.chain) && sent === media.mic.getAudioTracks()[0] && sent !== media.micRaw.getAudioTracks()[0];
+  });
+  await expect.poll(processed).toBe(true);
+
+  // O bipe acende o indicador por ~0,4 s a cada 1 s: amostra rápido em vez de depender da fase do polling.
+  const anaSpoke = () => host.evaluate(() => new Promise<boolean>((resolve) => {
+    const lit = () => [...document.querySelectorAll('.voice-member')].some((el) => el.textContent?.includes('Ana') && el.querySelector('.speaking'));
+    const timer = setInterval(() => lit() && (clearInterval(timer), resolve(true)), 20);
+    setTimeout(() => (clearInterval(timer), resolve(false)), 3000);
+  }));
+  await expect.poll(anaSpoke, { timeout: 15_000 }).toBe(true);
+
+  // Volume zero: nada passa da porta, então o indicador apaga sem reabrir o microfone.
+  const raw = await ana.evaluate(() => (window as any).session.media.micRaw.getAudioTracks()[0].id);
+  await ana.evaluate(() => (window as any).session.updateSettings({ micVolume: 0 }));
+  await expect.poll(anaSpoke, { timeout: 10_000 }).toBe(false);
+  await ana.evaluate(() => (window as any).session.updateSettings({ micVolume: 1 }));
+  await expect.poll(anaSpoke, { timeout: 15_000 }).toBe(true);
+  expect(await ana.evaluate(() => (window as any).session.media.micRaw.getAudioTracks()[0].id)).toBe(raw);
 });

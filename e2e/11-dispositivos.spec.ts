@@ -21,48 +21,64 @@ async function call() {
   return { host, ana };
 }
 
-const micLabel = (p: Page) => p.evaluate(() => (window as any).session.media.mic?.getAudioTracks()[0].label);
+// O dispositivo fica na captura crua; o que vai para a rede é a saída do tratamento de voz.
+const micLabel = (p: Page) => p.evaluate(() => (window as any).session.media.micRaw?.getAudioTracks()[0].label);
 const sentTrack = (p: Page, kind: string) => p.evaluate((k) => {
-  const [peer] = (window as any).session.media.peers.values();
+  const media = (window as any).session.media;
+  const [peer] = media.peers.values();
   const sender = peer.pc.getSenders().find((s: RTCRtpSender) => s.track?.kind === k);
-  return sender ? { label: sender.track.label, state: sender.track.readyState } : null;
+  const current = k === 'audio' ? media.mic?.getAudioTracks()[0] : null;
+  return sender ? { current: !current || sender.track === current, state: sender.track.readyState } : null;
 }, kind);
+// Seletor próprio: abre a lista, lê as opções (valor e nome) e fecha.
+const micSelect = (p: Page) => p.getByRole('combobox', { name: 'Microfone', exact: true });
+async function micOptions(p: Page) {
+  await micSelect(p).click();
+  const options = await p.getByRole('option').evaluateAll((els) => els.map((el) => ({ v: (el as HTMLElement).dataset.value!, t: el.textContent!.trim() })));
+  await p.keyboard.press('Escape');
+  return options;
+}
+async function chooseMic(p: Page, label: string) {
+  await micSelect(p).click();
+  await p.getByRole('option', { name: label, exact: true }).click();
+}
 const settings = async (p: Page) => {
   await p.getByRole('button', { name: 'Configurações' }).click();
-  await expect(p.getByLabel('Microfone', { exact: true }).locator('option')).not.toHaveCount(1);
+  await expect.poll(async () => (await micOptions(p)).length).toBeGreaterThan(1);
 };
 
 test('trocar de microfone no meio da chamada troca o que é enviado', async () => {
   const { host, ana } = await call();
   await settings(ana);
-  const select = ana.getByLabel('Microfone', { exact: true });
-  const options = await select.locator('option').evaluateAll((o: HTMLOptionElement[]) => o.map((x) => ({ v: x.value, t: x.textContent })));
+  const options = await micOptions(ana);
   const target = options.filter((o) => o.v && o.v !== 'default' && o.v !== 'communications').at(-1)!;
-  await select.selectOption(target.v);
+  await chooseMic(ana, target.t);
+  await expect(micSelect(ana)).toHaveText(target.t);
   await expect.poll(() => micLabel(ana)).toBe(target.t);
-  expect(await sentTrack(ana, 'audio')).toEqual({ label: target.t, state: 'live' });
+  expect(await sentTrack(ana, 'audio')).toEqual({ current: true, state: 'live' });
 
   const before = await host.evaluate(async () => Object.values(await (window as any).session.media.stats())[0] as any);
   await expect.poll(async () => (await host.evaluate(async () => Object.values(await (window as any).session.media.stats())[0] as any)).inbound).toBeGreaterThan(before.inbound + 500);
 
   // Trocas em sequência não deixam captura sobrando.
-  await select.selectOption('');
-  await select.selectOption(target.v);
+  await chooseMic(ana, 'Padrão do sistema');
+  await chooseMic(ana, target.t);
   await expect.poll(() => micLabel(ana)).toBe(target.t);
-  expect(await ana.evaluate(() => (window as any).session.media.mic.getAudioTracks()[0].readyState)).toBe('live');
+  expect(await ana.evaluate(() => (window as any).session.media.micRaw.getAudioTracks()[0].readyState)).toBe('live');
+  expect(await sentTrack(ana, 'audio')).toEqual({ current: true, state: 'live' });
 });
 
 test('fone desconectado cai para o padrão sem derrubar a voz', async () => {
   const { ana } = await call();
   const first = await ana.evaluate(() => {
-    const track = (window as any).session.media.mic.getAudioTracks()[0];
+    const track = (window as any).session.media.micRaw.getAudioTracks()[0];
     (window as any).oldTrack = track;
     track.stop();
     track.dispatchEvent(new Event('ended'));
     return track.id;
   });
-  await expect.poll(() => ana.evaluate(() => (window as any).session.media.mic?.getAudioTracks()[0].id)).not.toBe(first);
-  expect((await sentTrack(ana, 'audio'))?.state).toBe('live');
+  await expect.poll(() => ana.evaluate(() => (window as any).session.media.micRaw?.getAudioTracks()[0].id)).not.toBe(first);
+  await expect.poll(() => sentTrack(ana, 'audio')).toEqual({ current: true, state: 'live' });
 });
 
 test('fone novo aparece na lista sem recarregar', async () => {
@@ -76,7 +92,7 @@ test('fone novo aparece na lista sem recarregar', async () => {
     ];
     navigator.mediaDevices.dispatchEvent(new Event('devicechange'));
   });
-  await expect(ana.getByLabel('Microfone', { exact: true })).toContainText('Fone Novo');
+  await expect.poll(async () => (await micOptions(ana)).map((o) => o.t)).toContain('Fone Novo');
 });
 
 test('saída de áudio volta para o padrão e não é reaplicada à toa', async () => {
