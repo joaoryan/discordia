@@ -53,8 +53,8 @@ export const defaultSettings: Settings = {
   autoGainControl: true,
   voiceIsolation: true,
   noiseGate: true,
-  micVolume: 1,
-  sensitivity: 0.02,
+  micVolume: 0.5,
+  sensitivity: 0.026,
   sounds: true,
   soundVolume: 0.8,
   mutedSounds: [],
@@ -89,8 +89,25 @@ function write(key: string, value: unknown) {
 
 export const loadProfile = () => read<Profile>(KEYS.profile);
 export const saveProfile = (profile: Profile) => write(KEYS.profile, profile);
-export const loadSettings = (): Settings => ({ ...defaultSettings, ...read<Partial<Settings>>(KEYS.settings) });
-export const saveSettings = (settings: Settings) => write(KEYS.settings, settings);
+/** Sobe quando um padrão novo precisa valer também para quem já tinha ajustes salvos. */
+const SETTINGS_VERSION = 1;
+
+type StoredSettings = Partial<Settings> & { version?: number };
+
+export function loadSettings(): Settings {
+  const stored = read<StoredSettings>(KEYS.settings);
+  if (!stored) return { ...defaultSettings };
+  const { version = 0, ...saved } = stored;
+  // v1: volume do microfone 50% e sensibilidade 0.026 (os antigos 100% e 0.02 deixavam a voz alta demais).
+  if (version < 1) {
+    saved.micVolume = defaultSettings.micVolume;
+    saved.sensitivity = defaultSettings.sensitivity;
+  }
+  const settings = { ...defaultSettings, ...saved };
+  if (version < SETTINGS_VERSION) saveSettings(settings);
+  return settings;
+}
+export const saveSettings = (settings: Settings) => write(KEYS.settings, { ...settings, version: SETTINGS_VERSION });
 
 export function clientId() {
   let id = read<string>(KEYS.client);
