@@ -3,6 +3,8 @@
   import type { Profile } from '../lib/protocol';
   import { friends } from '../lib/friends.svelte';
   import { loadRecent } from '../lib/settings';
+  import { desktop } from '../lib/platform';
+  import { allDownloads, downloadFor } from '../lib/download';
   import Avatar from './Avatar.svelte';
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
@@ -33,6 +35,8 @@
   const recent = loadRecent();
   let picked = $state<string[]>([]);
   const shown = $derived(friends.sorted.slice(0, 6));
+  // Dentro do próprio app não faz sentido oferecer o download.
+  const app = desktop ? null : downloadFor(navigator.userAgent, (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform);
 
   function pick(address: string, on: boolean) {
     picked = on ? [...picked, address] : picked.filter((a) => a !== address);
@@ -89,6 +93,13 @@
         </div>
         {#if error}<p class="error">{error}</p>{/if}
       </form>
+
+      {#if app}
+        <div class="get-app">
+          <a class="btn" href={app.url}><Icon name="download" size={18} /> Baixar para {app.os}</a>
+          <small>Atalhos dentro do jogo e mini janela por cima. <a href={allDownloads} target="_blank" rel="noopener">Outros sistemas</a></small>
+        </div>
+      {/if}
     </section>
 
     <section class="side">
@@ -264,6 +275,28 @@
     border-left: 3px solid var(--accent);
     border-radius: 6px;
     background: rgb(var(--accent-rgb) / 10%);
+  }
+
+  .get-app {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  .get-app .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .get-app small a {
+    color: var(--accent);
   }
 
   .side {

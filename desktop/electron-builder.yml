@@ -28,12 +28,15 @@ protocols:
 win:
   target: nsis
   icon: desktop/build/icon.png
+# Nomes fixos: o botão do site aponta para releases/latest/download/<nome>, que vale para qualquer versão.
 nsis:
+  artifactName: Discordia-Windows.${ext}
   oneClick: true
   perMachine: false
   createDesktopShortcut: true
 mac:
   target: dmg
+  artifactName: Discordia-Mac.${ext}
   category: public.app-category.social-networking
   icon: desktop/build/icon.png
   hardenedRuntime: true
@@ -45,6 +48,7 @@ linux:
     - AppImage
     - deb
   category: Network
+  artifactName: Discordia-Linux.${ext}
   icon: desktop/build/icon.png
   maintainer: Discordia
 publish:
