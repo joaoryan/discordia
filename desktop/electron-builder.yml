@@ -34,15 +34,6 @@ nsis:
   oneClick: true
   perMachine: false
   createDesktopShortcut: true
-mac:
-  target: dmg
-  artifactName: Discordia-Mac.${ext}
-  category: public.app-category.social-networking
-  icon: desktop/build/icon.png
-  hardenedRuntime: true
-  extendInfo:
-    NSMicrophoneUsageDescription: O Discordia usa o microfone para a sua voz nas chamadas.
-    NSCameraUsageDescription: O Discordia usa a câmera quando você a liga numa chamada.
 linux:
   target:
     - AppImage

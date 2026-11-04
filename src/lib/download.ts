@@ -8,18 +8,17 @@ export interface DesktopDownload {
 
 const FILES: Record<string, DesktopDownload> = {
   windows: { os: 'Windows', url: `${RELEASES}/download/Discordia-Windows.exe` },
-  mac: { os: 'macOS', url: `${RELEASES}/download/Discordia-Mac.dmg` },
   linux: { os: 'Linux', url: `${RELEASES}/download/Discordia-Linux.AppImage` },
 };
 
 export const allDownloads = RELEASES;
 
-/** O instalador para o sistema de quem está vendo; nada em celular, onde o app não roda. */
+/** O instalador para o sistema de quem está vendo; nada em celular nem no Mac, que não têm app. */
 export function downloadFor(userAgent: string, platform = ''): DesktopDownload | null {
   const ua = `${platform} ${userAgent}`.toLowerCase();
   if (/android|iphone|ipad|ipod|mobile/.test(ua)) return null;
+  if (ua.includes('mac')) return null;
   if (ua.includes('win')) return FILES.windows;
-  if (ua.includes('mac')) return FILES.mac;
   if (ua.includes('linux') || ua.includes('x11')) return FILES.linux;
   return null;
 }
