@@ -1,7 +1,7 @@
 {
   "name": "Discordia",
   "short_name": "Discordia",
-  "description": "Salas de texto, voz e vídeo entre amigos.",
+  "description": "Salas de voz, vídeo e chat entre amigos, direto pelo link. Grátis e sem conta.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f0f15",

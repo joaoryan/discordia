@@ -61,6 +61,18 @@ Se a conexão direta falhar, os dois lados passam a usar TURN automaticamente. O
 
 **Recomendação: PWA.** O amigo precisa entrar em segundos, e instalador é uma barreira. O Tauri perde justamente onde importa, porque herda a WebRTC da WebView. Se a falta de áudio de sistema incomodar, o Electron pode embrulhar o mesmo front-end na v2.
 
+**Na v2, os dois.** O site continua sendo a porta de entrada pelo link, e o app em Electron (`desktop/`) embrulha a mesma build para quem joga. A página roda em `app://discordia`, com a mesma CSP do site, `contextIsolation`, sandbox e nenhum acesso ao Node. Ela só enxerga `window.desktop` (`src/lib/platform.ts`). O app acrescenta:
+
+| Recurso | Como |
+|---|---|
+| Apertar para falar dentro do jogo | `uiohook-napi` (o atalho global do Electron só avisa quando a tecla desce, não quando sobe) |
+| Mudo, ensurdecer e rádio por atalho | `globalShortcut`, registrado só durante a chamada |
+| Mini janela | Janela sem borda, sempre por cima, mostrada quando a principal perde o foco |
+| Bandeja | Mudo, ensurdecer e sair da chamada; fechar a janela não derruba a voz |
+| Áudio do sistema na tela | `setDisplayMediaRequestHandler` com `audio: 'loopback'` (Windows), escolhendo a fonte num seletor da própria página |
+| Convites | Protocolo `discordia://`, uma instância só |
+| Atualização | `electron-updater` a partir dos Releases do GitHub |
+
 ## 2. Topologia e limites
 
 Um navegador não tem SFU. Para retransmitir, ele decodifica e recodifica cada trilha, o que custa CPU e soma latência. Pior: com N pessoas num hub, o host precisaria recodificar N−1 trilhas para cada um dos N−1 participantes.
@@ -148,12 +160,13 @@ O F5 do host não encerra a sala: o estado vai para o `sessionStorage` e o host 
 | Tema | Decisão |
 |---|---|
 | Microfone | `getUserMedia` com `echoCancellation`, `noiseSuppression` e `autoGainControl` ligados, configuráveis |
+| Tratamento de voz | RNNoise (IA) → passa-altas em 85 Hz → volume → porta de voz → limitador, em AudioWorklet. Exige `'wasm-unsafe-eval'` na CSP; sem ele, envia o áudio cru |
 | Câmera | 640×360, ~500 kbps, reduzindo quando há mais de 3 pares |
 | Tela | `getDisplayMedia`; texto (1080p15, 2,5 Mbps), movimento (720p30, 2,5 Mbps) ou alta (1080p30, 4,5 Mbps). 1080p60 (6 Mbps) está comentado no código, reservado para o futuro |
 | Áudio | Opus, padrão do WebRTC, com FEC nativo |
 | Vídeo | Deixar o navegador escolher (VP8/VP9/H.264). AV1 consome mais CPU, o que pesa em malha |
 | Bitrate | `RTCRtpSender.setParameters` em cada conexão |
-| Indicador de fala | Cada um mede o próprio microfone e avisa pelo DataChannel; evita um analisador por pessoa |
+| Indicador de fala | A porta de voz de cada um avisa pelo DataChannel; acende só quando a voz realmente está sendo enviada |
 | Mudo | `track.enabled = false`: instantâneo, sem renegociar |
 | Supressão por IA (estilo Krisp) | Fora da v1: pesa e o supressor nativo atende |
 
@@ -179,6 +192,8 @@ O F5 do host não encerra a sala: o estado vai para o `sessionStorage` e o host 
 **Regras do YouTube atendidas:** player visível, ao menos 200×200, nada por cima, e cabeçalho Referer enviado. A autorização de incorporação é de cada vídeo; os bloqueados são pulados.
 
 **Vídeo no YouTube:** as políticas proíbem separar áudio de vídeo e usar player em segundo plano, então o player fica visível no tamanho mínimo (200×200) e é pausado para quem silencia o rádio.
+
+**Controle:** todos no canal do rádio pausam, pulam (na hora, sem votação), embaralham, removem e encerram; só o título do áudio de aba é da DJ. A faixa que termina volta para o fim da fila, e música nova entra no topo. Atalhos: Alt+Shift+P (pausa), Alt+Shift+N (pula), Alt+Shift+↑/↓ (volume), além das teclas de mídia via Media Session.
 
 **Spotify:** sem integração. O SDK exige Premium e a licença cobre uso pessoal e privado. O modo de aba é genérico; usá-lo com um serviço de streaming é decisão de quem transmite e pode contrariar os termos desse serviço.
 

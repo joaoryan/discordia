@@ -1,0 +1,37 @@
+# Gera o app de computador nos três sistemas a cada tag v*, e publica no Release do GitHub.
+# O app atualiza sozinho a partir desses Releases (electron-updater).
+name: App de computador
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Compilar e publicar
+        run: npm run desktop:dist -- --publish always
+        env:
+          # Endereço do Worker de sinalização e do site (para o link de convite).
+          VITE_SIGNAL_URL: ${{ vars.VITE_SIGNAL_URL }}
+          VITE_PUBLIC_URL: ${{ vars.VITE_PUBLIC_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Assinatura: sem os segredos abaixo o app sai sem assinatura (aviso do Windows e bloqueio no macOS).
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}

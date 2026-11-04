@@ -3,17 +3,16 @@
   import type { RoomSession } from '../lib/session.svelte';
   import Avatar from './Avatar.svelte';
   import Icon from './Icon.svelte';
+  import Logo from './Logo.svelte';
 
   let {
     session,
     profile,
-    oninvite,
     onsettings,
     onnewchannel,
   }: {
     session: RoomSession;
     profile: Profile;
-    oninvite: () => void;
     onsettings: () => void;
     onnewchannel: (kind: 'text' | 'voice') => void;
   } = $props();
@@ -25,8 +24,9 @@
 
 <aside>
   <header>
+    <Logo size={26} />
     <strong>{session.name}</strong>
-    <button aria-label="Convidar amigos" title="Convidar amigos" onclick={oninvite}><Icon name="plus" size={18} /></button>
+    {#if session.locked}<span class="locked" title="Sala trancada"><Icon name="lock" size={14} /></span>{/if}
   </header>
 
   <nav>
@@ -98,23 +98,23 @@
         <strong>Voz conectada</strong>
         <button class="back" onclick={() => (session.voiceView = true)}>{voiceName}</button>
       </div>
-      <button aria-label="Sair do canal de voz" title="Sair do canal de voz" onclick={() => session.leaveVoice()}><Icon name="hangup" /></button>
+      <!-- Fora da chamada o dock some: os controles de voz ficam aqui, sem duplicar. -->
+      {#if !session.voiceView}
+        <button aria-label={session.voice.muted ? 'Ativar microfone' : 'Silenciar microfone'} aria-pressed={session.voice.muted} class:off={session.voice.muted} onclick={() => session.setMuted(!session.voice.muted)}>
+          <Icon name={session.voice.muted ? 'micOff' : 'mic'} size={18} />
+        </button>
+        <button aria-label={session.voice.deafened ? 'Ativar áudio' : 'Ensurdecer'} aria-pressed={session.voice.deafened} class:off={session.voice.deafened} onclick={() => session.toggleDeafen()}>
+          <Icon name={session.voice.deafened ? 'headsetOff' : 'headset'} size={18} />
+        </button>
+        <button class="hang" aria-label="Sair do canal de voz" title="Sair do canal de voz" onclick={() => session.leaveVoice()}><Icon name="hangup" size={18} /></button>
+      {/if}
     </div>
   {/if}
 
   <footer>
     <Avatar name={profile.name} avatar={profile.avatar} color={profile.color} size={34} speaking={session.me?.speaking} online />
-    <span class="me">{profile.name}</span>
-    <button aria-label={session.voice.muted ? 'Ativar microfone' : 'Silenciar microfone'} aria-pressed={session.voice.muted} class:off={session.voice.muted} onclick={() => session.setMuted(!session.voice.muted)} disabled={!session.voice.channel}>
-      <Icon name={session.voice.muted ? 'micOff' : 'mic'} />
-    </button>
-    <button aria-label={session.voice.deafened ? 'Ativar áudio' : 'Ensurdecer'} aria-pressed={session.voice.deafened} class:off={session.voice.deafened} onclick={() => session.toggleDeafen()} disabled={!session.voice.channel}>
-      <Icon name={session.voice.deafened ? 'headsetOff' : 'headset'} />
-    </button>
-    <button aria-label="Modo jogo" aria-pressed={session.settings.gameMode} title="Modo jogo: mais leve, sem vídeo" class:game={session.settings.gameMode} onclick={() => session.toggleGameMode()}>
-      <Icon name="gamepad" />
-    </button>
-    <button aria-label="Configurações" onclick={onsettings}><Icon name="settings" /></button>
+    <span class="me">{profile.name}{#if session.isHost}<small>host da sala</small>{/if}</span>
+    <button aria-label="Configurações" title="Configurações" onclick={onsettings}><Icon name="settings" /></button>
   </footer>
 </aside>
 
@@ -130,14 +130,19 @@
     display: flex;
     flex: none;
     align-items: center;
-    justify-content: space-between;
-    height: 48px;
+    gap: 10px;
+    height: 52px;
     padding: 0 14px;
     border-bottom: 1px solid var(--line);
-    box-shadow: 0 1px 8px rgb(0 0 0 / 22%);
+  }
+
+  header :global(svg) {
+    flex: none;
   }
 
   header strong {
+    flex: 1;
+    min-width: 0;
     font-weight: 700;
     letter-spacing: -0.015em;
     overflow: hidden;
@@ -262,11 +267,16 @@
   .connected {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 2px;
     padding: 8px 12px;
     border-top: 1px solid var(--line);
     background: linear-gradient(0deg, rgb(67 208 138 / 8%), transparent);
     font-size: 13px;
+  }
+
+  .connected > div {
+    flex: 1;
+    min-width: 0;
   }
 
   .connected strong {
@@ -279,11 +289,28 @@
   }
 
   .connected > button {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
     color: var(--text-soft);
   }
 
   .connected > button:hover {
+    background: var(--bg-hover);
+  }
+
+  .connected > button.off {
     color: var(--danger);
+  }
+
+  .connected > button.hang:hover {
+    color: var(--danger);
+  }
+
+  .locked {
+    color: var(--accent);
   }
 
   footer {
@@ -321,11 +348,10 @@
     background: var(--bg-hover);
   }
 
-  footer button.game {
-    color: var(--accent);
-  }
-
-  footer button.off {
-    color: var(--danger);
+  .me small {
+    display: block;
+    color: var(--text-mute);
+    font-size: 11px;
+    font-weight: 400;
   }
 </style>

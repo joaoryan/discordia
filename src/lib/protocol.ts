@@ -57,6 +57,8 @@ export interface Profile {
   name: string;
   avatar: string;
   color: string;
+  /** Chave pública para mensagens entre amigos (src/lib/identity.ts). */
+  friend?: string;
 }
 
 export interface Member extends Profile {
@@ -73,7 +75,6 @@ export interface Track {
   videoId: string | null;
   title: string;
   addedBy: string;
-  votes: string[];
 }
 
 export interface RadioState {
@@ -85,15 +86,13 @@ export interface RadioState {
   position: number; // segundos no momento em que o host enviou
   paused: boolean;
   shuffle: boolean;
-  skipVotes: string[];
-  needed: number;
 }
 
 export type RadioCmd =
   | { cmd: 'start'; mode: RadioMode; title?: string }
   | { cmd: 'add'; tracks: { videoId: string; title: string }[] }
-  | { cmd: 'remove' | 'vote' | 'ended'; id: string }
-  | { cmd: 'skip' | 'force-skip' | 'shuffle' | 'stop' }
+  | { cmd: 'remove' | 'up' | 'ended'; id: string }
+  | { cmd: 'skip' | 'shuffle' | 'stop' }
   | { cmd: 'pause'; paused: boolean }
   | { cmd: 'title'; title: string };
 

@@ -75,13 +75,15 @@ test('playlist toca sincronizada, sem nenhuma trilha nova de mídia', async () =
   });
   expect(senders).toBe(1); // só o microfone
 
-  await radio(ana).getByRole('button', { name: /Pular \d/ }).click();
-  await expect(radio(host).getByRole('button', { name: /Pular \d/ })).toContainText('1/2');
-  await radio(host).getByRole('button', { name: /Pular 1/ }).click();
+  // Qualquer um pula na hora, e a que tocou vai para o fim da fila.
+  await radio(ana).getByRole('button', { name: 'Pular música' }).click();
+  await expect.poll(() => playing(host)).toBe('aaaaaaaaaa2');
   await expect.poll(() => playing(ana)).toBe('aaaaaaaaaa2');
+  await expect(radio(host).locator('ol li').last()).toContainText('Título aaaaaaaaaa1');
+  await expect(radio(host)).toContainText('A seguir — 2');
 });
 
-test('volume e silêncio do rádio são locais; só DJ controla', async () => {
+test('volume e silêncio são locais; todos controlam, com atalhos', async () => {
   const { host, ana } = await call();
   await startYouTube(host, 'https://youtu.be/bbbbbbbbbbb');
   await expect.poll(() => playing(ana)).toBe('bbbbbbbbbbb');
@@ -93,18 +95,25 @@ test('volume e silêncio do rádio são locais; só DJ controla', async () => {
   await expect.poll(() => ana.evaluate(() => (window as any).__player.state)).toBe(1);
   await radio(ana).getByLabel('Volume do rádio').fill('0.2');
   await expect.poll(() => ana.evaluate(() => (window as any).__player.volume)).toBe(20);
-  await expect(radio(ana).getByRole('button', { name: 'Encerrar' })).toHaveCount(0);
 
-  await radio(host).getByRole('button', { name: 'Pausar' }).click();
-  await expect.poll(() => ana.evaluate(() => (window as any).__player.state)).toBe(2);
-  await radio(host).getByRole('button', { name: 'Continuar' }).click();
-  await expect.poll(() => ana.evaluate(() => (window as any).__player.state)).toBe(1);
+  // Quem não é DJ também pausa, pelo botão ou pelo atalho.
+  await radio(ana).getByRole('button', { name: 'Pausar' }).click();
+  await expect.poll(() => host.evaluate(() => (window as any).__player.state)).toBe(2);
+  await expect(radio(ana).getByRole('button', { name: 'Continuar' })).toBeVisible();
+  await ana.keyboard.press('Alt+Shift+KeyP');
+  await expect.poll(() => host.evaluate(() => (window as any).__player.state)).toBe(1);
+  await ana.keyboard.press('Alt+Shift+ArrowUp');
+  await expect.poll(() => ana.evaluate(() => (window as any).__player.volume)).toBe(30);
+  await ana.keyboard.press('Alt+Shift+ArrowDown');
+  await ana.keyboard.press('Alt+Shift+ArrowDown');
+  await expect.poll(() => ana.evaluate(() => (window as any).__player.volume)).toBe(10);
+  expect(await host.evaluate(() => (window as any).__player.volume)).toBe(50);
 
-  await radio(host).getByRole('button', { name: 'Encerrar' }).click();
-  await expect(radio(ana)).toHaveCount(0);
+  await radio(ana).getByRole('button', { name: 'Encerrar' }).click();
+  await expect(radio(host)).toHaveCount(0);
 });
 
-test('fila por voto e vídeo bloqueado pula sozinho', async () => {
+test('música nova toca a seguir e vídeo bloqueado pula sozinho', async () => {
   const { host, ana } = await call();
   await startYouTube(host, 'https://youtu.be/ccccccccccc');
   await expect.poll(() => playing(host)).toBe('ccccccccccc');
@@ -113,11 +122,14 @@ test('fila por voto e vídeo bloqueado pula sozinho', async () => {
     await radio(ana).getByRole('button', { name: 'Adicionar à fila' }).click();
     await expect(radio(host)).toContainText(`Título ${id}`);
   }
-  await radio(host).getByRole('button', { name: 'Votar em Título eeeeeeeeeee' }).click();
+  // Cada música adicionada entra no topo: eee, depois ddd.
+  await expect(radio(host).locator('ol li').first()).toContainText('Título eeeeeeeeeee');
+  await radio(host).getByRole('button', { name: 'Tocar a seguir: Título ddddddddddd' }).click();
+  await expect(radio(ana).locator('ol li').first()).toContainText('Título ddddddddddd');
   await host.evaluate(() => (window as any).__player.o.events.onError({ data: 150 }));
-  await expect.poll(() => playing(ana)).toBe('eeeeeeeeeee');
+  await expect.poll(() => playing(ana)).toBe('ddddddddddd');
   await ana.evaluate(() => (window as any).__player.set(0));
-  await expect.poll(() => playing(host)).toBe('ddddddddddd');
+  await expect.poll(() => playing(host)).toBe('eeeeeeeeeee');
 });
 
 test('quem entra depois começa no ponto certo e atraso é corrigido', async () => {

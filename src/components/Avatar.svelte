@@ -55,8 +55,9 @@
     user-select: none;
   }
 
+  /* Dourado é fala; o verde fica só para "online". */
   .speaking {
-    box-shadow: 0 0 0 2px var(--bg-side), 0 0 0 4px var(--ok);
+    box-shadow: 0 0 0 2px var(--bg-side), 0 0 0 4px var(--accent);
   }
 
   img {

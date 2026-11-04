@@ -16,8 +16,10 @@ export default defineConfig({
   reporter: 'list',
   use: { baseURL: 'http://localhost:5173', viewport: { width: 1280, height: 760 }, trace: 'retain-on-failure' },
   projects: [
-    { name: 'chromium', testIgnore: /6-producao/, use: { launchOptions: { args: FAKE_MEDIA } } },
+    { name: 'chromium', testIgnore: /6-producao|16-desktop/, use: { launchOptions: { args: FAKE_MEDIA } } },
     { name: 'producao', testMatch: /6-producao/, use: { baseURL: 'http://localhost:4173', launchOptions: { args: FAKE_MEDIA } } },
+    // App de computador: usa a build de produção que o webServer abaixo gera.
+    { name: 'desktop', testMatch: /16-desktop/ },
   ],
   webServer: [
     {

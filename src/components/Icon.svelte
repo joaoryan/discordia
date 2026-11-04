@@ -37,6 +37,11 @@
     expand: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
     trash: 'M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7',
     logout: 'M9 4H4v16h5m6-12 4 4-4 4m4-4H9',
+    check: 'M5 12.500 10 17.500 19 7',
+    chevron: 'M6 9l6 6 6-6',
+    chat: 'M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z',
+    back: 'M15 18l-6-6 6-6',
+    ban: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM5.600 5.600l12.800 12.800',
   };
   let { name, size = 20 }: { name: keyof typeof PATHS; size?: number } = $props();
 </script>

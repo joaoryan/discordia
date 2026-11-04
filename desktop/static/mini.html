@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>Discordia</title>
+    <link rel="stylesheet" href="mini.css" />
+  </head>
+  <body>
+    <!-- Compacta: só rostos e microfone. Expandida: nomes e todos os controles. -->
+    <main id="card" class="compact">
+      <header>
+        <span class="grip" title="Arraste para mover"></span>
+        <ul id="faces" aria-label="Na chamada"></ul>
+        <strong id="channel"></strong>
+        <button id="mute" class="icon" aria-label="Silenciar microfone"></button>
+        <button id="expand" class="icon" aria-label="Expandir" title="Expandir"></button>
+      </header>
+      <section id="details">
+        <ul id="people"></ul>
+        <footer>
+          <button id="deafen" aria-label="Ensurdecer">Ensurdecer</button>
+          <button id="open" aria-label="Abrir o Discordia">Abrir</button>
+          <button id="leave" class="red" aria-label="Sair da chamada">Sair</button>
+        </footer>
+      </section>
+    </main>
+    <script src="mini.js"></script>
+  </body>
+</html>

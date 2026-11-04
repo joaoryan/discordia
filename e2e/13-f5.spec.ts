@@ -1,5 +1,5 @@
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
-import { createRoom, joinRoom, memberList, person, say } from './helpers';
+import { createRoom, joinRoom, members, person, say } from './helpers';
 
 let browsers: Browser[] = [];
 test.beforeEach(async () => {
@@ -40,7 +40,7 @@ test('F5 do host: mesma sala, mesmo código, histórico e todos de volta', async
   await expect(host.locator('main header .code code')).toHaveText(code, { timeout: 15_000 });
   await expect(host.getByText('mensagem antes do F5')).toBeVisible();
   await expect(host.getByRole('button', { name: 'Destrancar sala' })).toBeVisible();
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 3', { timeout: 20_000 });
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 3', { timeout: 20_000 });
   await expect(ana.getByRole('alert')).toHaveCount(0);
 
   await say(host, 'voltei');
@@ -63,7 +63,7 @@ test('voz entre convidados não cai no F5 e o host volta para a chamada', async 
   await host.reload();
   await expect(ana.getByText('O host está recarregando')).toBeVisible({ timeout: 5000 });
   const before = (await peerBytes(ana, 'Bia')).inbound;
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 3', { timeout: 20_000 });
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 3', { timeout: 20_000 });
   await expect.poll(async () => (await peerBytes(ana, 'Bia'))?.inbound ?? 0).toBeGreaterThan(before);
 
   expect(await ana.evaluate(() => (window as any).session.selfId)).toBe(id); // mesmo id
@@ -81,8 +81,8 @@ test('voz entre convidados não cai no F5 e o host volta para a chamada', async 
 test('encerrar depois do F5 acaba de verdade e não volta sozinho', async () => {
   const { host, ana, code } = await room();
   await host.reload();
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 3', { timeout: 20_000 });
-  await host.getByRole('navigation', { name: 'Servidores' }).getByRole('button', { name: 'Encerrar sala' }).click();
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 3', { timeout: 20_000 });
+  await host.locator('main header').getByRole('button', { name: 'Encerrar sala' }).click();
   await host.getByRole('dialog').getByRole('button', { name: 'Encerrar sala' }).click();
   await expect(ana.getByRole('alert')).toHaveText('A sala foi encerrada pelo host.');
   await host.reload();
@@ -95,7 +95,7 @@ test('encerrar depois do F5 acaba de verdade e não volta sozinho', async () => 
 test('nova aba do mesmo navegador não vira host da sala', async () => {
   const { host, code } = await room();
   await host.reload();
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 3', { timeout: 20_000 });
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 3', { timeout: 20_000 });
   const tab = await host.context().newPage();
   await tab.goto('/');
   await expect(tab.getByRole('button', { name: 'Criar sala' })).toBeVisible();
@@ -108,7 +108,7 @@ test('dois F5 seguidos', async () => {
   await host.reload();
   await expect(host.locator('main header .code code')).toBeVisible({ timeout: 15_000 });
   await host.reload();
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 3', { timeout: 30_000 });
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 3', { timeout: 30_000 });
   await say(ana, 'ainda aqui');
   await expect(host.getByText('ainda aqui')).toBeVisible();
 });

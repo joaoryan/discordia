@@ -15,8 +15,10 @@ export function generateCode() {
 
 export const formatCode = (code: string) => `${code.slice(0, 3)}-${code.slice(3)}`;
 
+/** Aceita o código digitado ("ab7 k2q") ou o link de convite colado inteiro. */
 export function normalizeCode(input: string) {
-  const code = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const fromLink = input.includes('#') ? input.slice(input.lastIndexOf('#') + 1) : input;
+  const code = fromLink.toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== LENGTH) return null;
   return [...code].every((c) => ALPHABET.includes(c)) ? code : null;
 }

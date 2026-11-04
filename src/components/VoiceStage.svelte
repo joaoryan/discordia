@@ -84,30 +84,51 @@
     {/each}
   </div>
 
-  <div class="controls">
+  <!-- Dock único: voz · vídeo · extras · sair. -->
+  <div class="controls" role="toolbar" aria-label="Controles da chamada">
     <button
       class="round"
       class:off={session.voice.muted}
       aria-label={session.voice.muted ? 'Ativar microfone' : 'Silenciar microfone'}
+      title="{session.voice.muted ? 'Ativar' : 'Silenciar'} microfone (Alt+Shift+M)"
       onclick={() => session.setMuted(!session.voice.muted)}
     >
       <Icon name={session.voice.muted ? 'micOff' : 'mic'} size={22} />
     </button>
-    <button class="round" class:on={session.localCamera} aria-label={session.localCamera ? 'Desligar câmera' : 'Ligar câmera'} onclick={() => session.toggleCamera()}>
+    <button
+      class="round"
+      class:off={session.voice.deafened}
+      aria-label={session.voice.deafened ? 'Ativar áudio' : 'Ensurdecer'}
+      title="{session.voice.deafened ? 'Voltar a ouvir' : 'Ensurdecer'} (Alt+Shift+D)"
+      onclick={() => session.toggleDeafen()}
+    >
+      <Icon name={session.voice.deafened ? 'headsetOff' : 'headset'} size={22} />
+    </button>
+    <span class="sep" aria-hidden="true"></span>
+    <button class="round" class:on={session.localCamera} aria-label={session.localCamera ? 'Desligar câmera' : 'Ligar câmera'} title={session.localCamera ? 'Desligar câmera' : 'Ligar câmera'} onclick={() => session.toggleCamera()}>
       <Icon name={session.localCamera ? 'camera' : 'cameraOff'} size={22} />
     </button>
     <button
       class="round"
       class:on={session.localScreen}
       aria-label={session.localScreen ? 'Parar de compartilhar' : 'Compartilhar tela'}
+      title={session.localScreen ? 'Parar de compartilhar' : 'Compartilhar tela'}
       onclick={() => (session.localScreen ? session.stopScreen() : onscreen())}
     >
       <Icon name="screen" size={22} />
     </button>
+    <span class="sep" aria-hidden="true"></span>
     <button class="round" class:on={session.radioHere} aria-label="Rádio" title="Rádio" disabled={!!session.radio} onclick={onradio}>
       <Icon name="music" size={22} />
     </button>
-    <button class="round hang" aria-label="Sair do canal de voz" onclick={() => session.leaveVoice()}>
+    <button class="round" class:on={session.callChat} aria-label="Chat" aria-pressed={session.callChat} title="Chat ao lado da chamada" onclick={() => (session.callChat = !session.callChat)}>
+      <Icon name="send" size={20} />
+    </button>
+    <button class="round" class:on={session.settings.gameMode} aria-label="Modo jogo" aria-pressed={session.settings.gameMode} title="Modo jogo: mais leve, sem vídeo" onclick={() => session.toggleGameMode()}>
+      <Icon name="gamepad" size={22} />
+    </button>
+    <span class="sep" aria-hidden="true"></span>
+    <button class="round hang" aria-label="Sair do canal de voz" title="Sair do canal de voz" onclick={() => session.leaveVoice()}>
       <Icon name="hangup" size={22} />
     </button>
   </div>
@@ -208,7 +229,10 @@
   .controls {
     display: flex;
     flex: none;
-    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100% - 24px);
+    gap: 8px;
     align-self: center;
     margin: 4px 0 16px;
     padding: 8px 10px;
@@ -216,6 +240,12 @@
     border-radius: 999px;
     background: var(--bg-side);
     box-shadow: var(--shadow);
+  }
+
+  .sep {
+    width: 1px;
+    margin: 8px 2px;
+    background: var(--line);
   }
 
   .round {

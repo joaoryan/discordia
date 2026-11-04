@@ -1,5 +1,5 @@
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
-import { createRoom, joinRoom, memberList, person, shots } from './helpers';
+import { createRoom, joinRoom, members, person, shots } from './helpers';
 
 // Navegador próprio: a suíte passa dezenas de pessoas pelo mesmo processo e esgota as capturas de áudio.
 let own: Browser;
@@ -32,7 +32,7 @@ async function call(browser: Browser) {
 }
 
 const anaMenu = async (page: Page) => {
-  await memberList(page).getByRole('button', { name: /Ana/ }).click();
+  await (await members(page)).getByRole('button', { name: /Ana/ }).click();
   await expect(page.getByRole('menu')).toBeVisible();
 };
 
@@ -75,13 +75,14 @@ test('host desconecta da voz e a pessoa continua na sala', async () => {
   await expect(ana.getByText('O host desconectou você da voz.')).toBeVisible();
   await expect.poll(() => ana.evaluate(() => (window as any).session.media.mic)).toBeNull();
   await expect(ana.getByRole('textbox', { name: 'Mensagem' })).toBeVisible();
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 2');
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 2');
 });
 
 test('apertar para falar abre o microfone só com a tecla', async () => {
   const { ana } = await call(own);
   const enabled = () => ana.evaluate(() => (window as any).session.media.mic.getAudioTracks()[0].enabled);
   await ana.getByRole('button', { name: 'Configurações' }).click();
+  await ana.getByRole('tab', { name: 'Atalhos' }).click();
   await ana.getByRole('checkbox', { name: 'Apertar para falar' }).check();
   await ana.getByRole('dialog').getByRole('button', { name: 'Fechar' }).click();
   await ana.evaluate(() => (document.activeElement as HTMLElement).blur());

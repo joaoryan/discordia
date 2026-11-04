@@ -9,8 +9,7 @@ import { LIMITS, emptyVoice, type Attachment, type Channel, type ClientMsg, type
 import { clearRoom, saveRoom, type SavedRoom } from './roomStore';
 import { clientId, tabId, defaultUserAudio, loadSettings, rememberRoom, saveSettings, type Settings, type UserAudio } from './settings';
 import { SIGNAL_ERRORS, SignalClient, fetchIceServers } from './signaling';
-import { setSoundOutput, sounds } from './sounds';
-import { applyTheme } from './theme';
+import { playSound, setSoundOutput, type SoundId } from './sounds';
 
 const CONNECT_TIMEOUT_MS = 20_000;
 const RECONNECT_WINDOW_MS = 45_000; // cobre a carência de 30 s do Worker
@@ -43,6 +42,8 @@ export class RoomSession {
   messages = $state<Record<string, Message[]>>({});
   active = $state('geral');
   voiceView = $state(false);
+  /** Chat do canal de texto ao lado do palco, durante a chamada. */
+  callChat = $state(innerWidth > 1100);
   unread = $state<Record<string, number>>({});
   typing = $state<Record<string, Record<string, number>>>({});
   remote = $state.raw<Record<string, MediaStream[]>>({});
@@ -99,6 +100,7 @@ export class RoomSession {
       },
       micLost: () => {
         this.hasMic = false;
+        this.play('alert');
         this.toast('Microfone desconectado. Conecte outro e ative o microfone.');
         this.pushVoice({ muted: true });
       },
@@ -194,7 +196,7 @@ export class RoomSession {
     if (saved.voice) {
       await this.joinVoice(saved.voice.channel);
       if (saved.voice.deafened) this.toggleDeafen();
-      else if (saved.voice.muted) void this.setMuted(true);
+      else if (saved.voice.muted) void this.setMuted(true, true);
     }
   }
 
@@ -342,6 +344,7 @@ export class RoomSession {
   private async onHubLost() {
     if (this.leaving || this.phase === 'ended') return;
     this.phase = 'reconnecting';
+    this.play('disconnect');
     const voice = $state.snapshot(this.voice);
     // Só a ligação com o host caiu: a voz direta com os outros convidados segue de pé.
     this.media.dropPeer('host');
@@ -353,6 +356,7 @@ export class RoomSession {
       if (this.leaving) return;
       try {
         await this.connectGuest();
+        this.play('reconnect');
         this.hostReloading = false;
         this.meshGraceUntil = Date.now() + MESH_GRACE_MS;
         setTimeout(() => this.syncMesh(), MESH_GRACE_MS + 50);
@@ -364,6 +368,7 @@ export class RoomSession {
         if ((this.phase as Phase) === 'ended') return;
       }
     }
+    this.play('alert');
     this.end(this.hostReloading || roomGone ? 'O host não voltou e a sala foi encerrada.' : 'A conexão com a sala foi perdida.');
   }
 
@@ -399,6 +404,7 @@ export class RoomSession {
         this.settle?.reject(msg.reason);
         return this.end(msg.reason);
       case 'member-join':
+        if (msg.member.id !== this.selfId && !this.members.some((m) => m.id === msg.member.id)) this.play('memberEnter');
         this.members = [...this.members.filter((m) => m.id !== msg.member.id), msg.member];
         return;
       case 'member-leave':
@@ -454,12 +460,15 @@ export class RoomSession {
         return;
       case 'force-mute':
         this.toast('O host silenciou seu microfone.');
-        return this.setMuted(true);
+        this.play('alert');
+        return this.setMuted(true, true);
       case 'notice':
         return this.toast(msg.text);
       case 'kicked':
+        this.play('alert');
         return this.end(msg.banned ? 'Você foi banido da sala pelo host.' : 'Você foi expulso da sala pelo host.');
       case 'closed':
+        this.play('alert');
         return this.end('A sala foi encerrada pelo host.');
     }
   }
@@ -479,12 +488,27 @@ export class RoomSession {
     return !!this.radio && this.radio.channel === this.voice.channel;
   }
 
+  /** Só a DJ do áudio de aba muda o título; o resto do rádio é de todos no canal. */
   get canControlRadio() {
-    return !!this.radio && (this.isHost || this.radio.dj === this.selfId);
+    return !!this.radio && this.radio.dj === this.selfId;
   }
 
   radioCmd(cmd: RadioCmd) {
     this.send({ t: 'radio', radio: cmd });
+  }
+
+  /** Atalhos do rádio: os mesmos para o teclado da página, as teclas de mídia e o app de computador. */
+  radioShortcut(action: 'pause' | 'next' | 'up' | 'down') {
+    const radio = this.radio;
+    if (!radio || !this.radioHere) return;
+    const youtube = radio.mode === 'youtube' && !!radio.current;
+    if (action === 'pause' && youtube) return this.radioCmd({ cmd: 'pause', paused: !radio.paused });
+    if (action === 'next' && youtube) return this.radioCmd({ cmd: 'skip' });
+    if (action !== 'up' && action !== 'down') return;
+    const step = action === 'up' ? 0.1 : -0.1;
+    const radioVolume = Math.round(Math.min(1, Math.max(0, this.settings.radioVolume + step)) * 100) / 100;
+    this.updateSettings({ radioVolume, ...(step > 0 ? { radioMuted: false } : {}) });
+    this.toast(`Volume do rádio: ${Math.round(radioVolume * 100)}%`, 1200);
   }
 
   async startTabRadio(title: string) {
@@ -518,8 +542,10 @@ export class RoomSession {
         this.teardownVoice();
         this.voiceView = false;
       }
-    } else if (mine && wasHere !== isHere && this.settings.sounds) {
-      (isHere ? sounds.join : sounds.leave)();
+    } else if (mine && wasHere !== isHere) {
+      this.play(isHere ? 'userJoin' : 'userLeave');
+    } else if (mine && isHere && next.voice.screen && !previous?.voice.screen) {
+      this.play('streamOther');
     }
     if (next.id !== this.selfId && !next.voice.screen) {
       this.watching = this.watching.filter((id) => id !== next.id);
@@ -544,11 +570,11 @@ export class RoomSession {
     if (list.length > LIMITS.historyPerChannel) list.shift();
     if (message.system || message.author === this.selfId) return;
 
-    const seen = message.channel === this.active && !this.voiceView && document.visibilityState === 'visible';
+    const seen = message.channel === this.active && this.chatVisible && document.visibilityState === 'visible';
     if (!seen) this.unread[message.channel] = (this.unread[message.channel] ?? 0) + 1;
 
     const mentioned = this.mentionsMe(message.text);
-    if (this.settings.sounds && !seen) (mentioned ? sounds.mention : sounds.message)();
+    if (!seen) this.play(mentioned ? 'mention' : 'message');
     if (mentioned && document.hidden && this.settings.notifications && Notification.permission === 'granted') {
       new Notification(`${message.authorName} mencionou você`, { body: message.text.slice(0, 120), tag: message.id });
     }
@@ -560,6 +586,11 @@ export class RoomSession {
   }
 
   // --- Ações da interface ---
+
+  /** O chat do canal ativo está na tela: na conversa ou ao lado da chamada. */
+  get chatVisible() {
+    return !this.voiceView || (this.callChat && !!this.voice.channel);
+  }
 
   openChannel(id: string) {
     this.active = id;
@@ -624,7 +655,7 @@ export class RoomSession {
     this.joining = false;
     this.applyMic(muted);
     this.pushVoice({ channel, muted, deafened: false, camera: null, screen: null, screenAudio: false, radio: null });
-    if (this.settings.sounds) sounds.join();
+    this.play('join');
   }
 
   private moveVoice(channel: string) {
@@ -632,7 +663,7 @@ export class RoomSession {
     if (this.localScreen) this.stopScreen();
     this.media.stopRadio();
     this.pushVoice({ channel, camera: null, screen: null, screenAudio: false, radio: null });
-    if (this.settings.sounds) sounds.join();
+    this.play('join');
   }
 
   leaveVoice() {
@@ -640,7 +671,7 @@ export class RoomSession {
     this.pushVoice(emptyVoice());
     this.teardownVoice();
     this.voiceView = false;
-    if (this.settings.sounds) sounds.leave();
+    this.play('leave');
   }
 
   private teardownVoice() {
@@ -650,7 +681,13 @@ export class RoomSession {
     this.watching = [];
   }
 
-  async setMuted(muted: boolean) {
+  /** Toca um aviso, se a pessoa não desligou os sons ou este som em particular. */
+  play(id: SoundId) {
+    const { sounds, mutedSounds, soundVolume } = this.settings;
+    if (sounds && !mutedSounds.includes(id)) playSound(id, soundVolume);
+  }
+
+  async setMuted(muted: boolean, quiet = false) {
     if (!muted && !this.media.mic) {
       // Quem entrou só ouvindo ou perdeu o fone pode tentar de novo ao ativar.
       try {
@@ -661,7 +698,7 @@ export class RoomSession {
       }
     }
     this.applyMic(muted);
-    if (this.settings.sounds) (muted ? sounds.mute : sounds.unmute)();
+    if (!quiet) this.play(muted ? 'mute' : 'unmute');
     this.pushVoice({ muted, deafened: muted ? this.voice.deafened : false });
   }
 
@@ -671,6 +708,7 @@ export class RoomSession {
   }
 
   holdToTalk(held: boolean) {
+    if (held !== this.talkHeld && this.settings.pushToTalk && this.voice.channel && !this.voice.muted) this.play(held ? 'pttOn' : 'pttOff');
     this.talkHeld = held;
     this.applyMic(this.voice.muted);
   }
@@ -689,7 +727,7 @@ export class RoomSession {
     // Ao voltar a ouvir, o microfone volta ao estado de antes.
     const muted = deafened || this.mutedBeforeDeafen || !this.media.mic;
     this.applyMic(muted);
-    if (this.settings.sounds) (deafened ? sounds.mute : sounds.unmute)();
+    this.play(deafened ? 'deafen' : 'undeafen');
     this.pushVoice({ deafened, muted });
   }
 
@@ -707,6 +745,7 @@ export class RoomSession {
       this.localScreen = await this.media.startScreen(quality, withAudio);
       const hasAudio = this.localScreen.getAudioTracks().length > 0;
       this.pushVoice({ screen: this.localScreen.id, screenAudio: hasAudio });
+      this.play('streamStart');
       this.focus = 'me-screen';
       if (withAudio && !hasAudio) {
         this.toast('Transmissão sem som: escolha "Tela inteira" e ligue "Compartilhar áudio do sistema".', 9000);
@@ -717,6 +756,7 @@ export class RoomSession {
   }
 
   stopScreen() {
+    if (this.localScreen) this.play('streamStop');
     this.media.stopScreen();
     this.localScreen = null;
     if (this.focus === 'me-screen') this.focus = null;
@@ -731,17 +771,17 @@ export class RoomSession {
   }
 
   updateSettings(patch: Partial<Settings>) {
-    const micChanged = ['micId', 'echoCancellation', 'noiseSuppression', 'autoGainControl'].some(
-      (key) => key in patch && patch[key as keyof Settings] !== this.settings[key as keyof Settings],
-    );
+    const changed = (keys: (keyof Settings)[]) => keys.some((key) => key in patch && patch[key] !== this.settings[key]);
+    const micChanged = changed(['micId', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation']);
+    const voiceTuned = changed(['micVolume', 'noiseGate', 'sensitivity']);
     const cameraChanged = 'camId' in patch && patch.camId !== this.settings.camId;
     const outputChanged = 'speakerId' in patch && patch.speakerId !== this.settings.speakerId;
     Object.assign(this.settings, patch);
-    if (patch.theme) applyTheme(patch.theme);
     saveSettings($state.snapshot(this.settings));
     if ('pushToTalk' in patch) this.applyMic(this.voice.muted);
     if (outputChanged) setSoundOutput(this.settings.speakerId);
     if (cameraChanged) void this.media.switchCamera().catch(() => this.toast('Não foi possível trocar a câmera.'));
+    if (voiceTuned) this.media.updateMicOptions();
     if (micChanged) void this.media.switchMic().catch(() => this.toast('Não foi possível trocar o microfone.'));
   }
 

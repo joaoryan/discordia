@@ -1,5 +1,5 @@
 import { chromium, expect, test, type Browser } from '@playwright/test';
-import { memberList } from './helpers';
+import { members } from './helpers';
 
 let browser: Browser;
 test.beforeEach(async () => {
@@ -27,7 +27,7 @@ test('três abas do mesmo navegador são três pessoas', async () => {
     await tab.goto(`/#${code}`);
     await expect(tab.getByRole('textbox', { name: 'Mensagem' })).toBeVisible({ timeout: 20_000 });
   }
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 4');
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 4');
   await expect(host.getByRole('textbox', { name: 'Mensagem' })).toBeVisible();
 });
 
@@ -42,7 +42,7 @@ test('link de convite entra direto, mesmo no primeiro acesso', async () => {
     const page = await setup(context, name, `/#${code}`);
     await expect(page.getByRole('textbox', { name: 'Mensagem' })).toBeVisible({ timeout: 20_000 });
   }
-  await expect(memberList(host).getByRole('heading')).toHaveText('Online — 4');
+  await expect((await members(host)).getByRole('heading')).toHaveText('Online — 4');
 });
 
 test('banimento vale para outras abas do mesmo navegador', async () => {
@@ -53,7 +53,7 @@ test('banimento vale para outras abas do mesmo navegador', async () => {
   const context = await browser.newContext({ baseURL: 'http://localhost:5173' });
   const ana = await setup(context, 'Ana', `/#${code}`);
   await expect(ana.getByRole('textbox', { name: 'Mensagem' })).toBeVisible({ timeout: 20_000 });
-  await memberList(host).getByRole('button', { name: /Ana/ }).click();
+  await (await members(host)).getByRole('button', { name: /Ana/ }).click();
   await host.getByRole('menuitem', { name: 'Banir' }).click();
   const tab = await context.newPage();
   await tab.goto(`/#${code}`);

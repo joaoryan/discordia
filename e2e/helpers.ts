@@ -38,4 +38,9 @@ export async function say(page: Page, text: string) {
   await page.keyboard.press('Enter');
 }
 
-export const memberList = (page: Page) => page.getByRole('complementary', { name: 'Membros' });
+/** A lista de membros agora é um painel sob demanda: abre se estiver fechada. */
+export async function members(page: Page) {
+  const list = page.getByRole('complementary', { name: 'Membros' });
+  if (!(await list.isVisible())) await page.getByRole('button', { name: 'Mostrar ou ocultar membros' }).click();
+  return list;
+}
