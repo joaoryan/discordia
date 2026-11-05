@@ -1,5 +1,5 @@
-import { expect, firefox, test } from '@playwright/test';
-import { createRoom, joinRoom, person, say } from './helpers';
+import { expect, firefox } from '@playwright/test';
+import { createRoom, joinRoom, person, say, test } from './helpers';
 
 test('Chromium e Firefox na mesma sala, com o Firefox como convidado e como host', async ({ browser }) => {
   const gecko = await firefox.launch({

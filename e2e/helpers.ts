@@ -1,11 +1,22 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { test as base, expect, type Browser, type Page } from '@playwright/test';
 
 export const shots = 'test-results/screens';
 
-// Cada pessoa abre sua própria sessão; sem fechar, chamadas de um teste pesam no seguinte.
+// Cada pessoa abre sua própria sessão; sem fechar, chamadas de um teste pesam no seguinte
+// e, depois de algumas dezenas, o Chromium esgota as capturas de áudio (NotReadableError).
+// Precisa ser fixture: um `test.afterEach` aqui só valeria no primeiro arquivo que importa
+// este módulo, porque ele é avaliado uma vez por worker.
 const open: { close: () => Promise<void> }[] = [];
-test.afterEach(async () => {
-  await Promise.all(open.splice(0).map((context) => context.close().catch(() => {})));
+export const test = base.extend<{ closeContexts: void }>({
+  closeContexts: [
+    async ({ browser }, use) => {
+      await use();
+      // Também fecha os contextos criados à mão no navegador compartilhado.
+      const all = [...open.splice(0), ...browser.contexts()];
+      await Promise.all(all.map((context) => context.close().catch(() => {})));
+    },
+    { auto: true },
+  ],
 });
 
 export async function person(browser: Browser, name: string) {

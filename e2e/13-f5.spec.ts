@@ -1,5 +1,5 @@
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
-import { createRoom, joinRoom, members, person, say } from './helpers';
+import { chromium, expect, type Browser, type Page } from '@playwright/test';
+import { createRoom, joinRoom, members, person, say, test } from './helpers';
 
 let browsers: Browser[] = [];
 test.beforeEach(async () => {

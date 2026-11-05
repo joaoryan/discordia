@@ -1,5 +1,5 @@
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
-import { createRoom, joinRoom, person, say, shots } from './helpers';
+import { chromium, expect, type Browser, type Page } from '@playwright/test';
+import { createRoom, joinRoom, person, say, shots, test } from './helpers';
 
 const fakeCapture = (page: Page, withAudio: boolean) => page.evaluate((audio) => {
   navigator.mediaDevices.getDisplayMedia = async (options) => {

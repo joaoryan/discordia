@@ -1,5 +1,5 @@
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
-import { createRoom, joinRoom, person, shots } from './helpers';
+import { chromium, expect, type Browser, type Page } from '@playwright/test';
+import { createRoom, joinRoom, person, shots, test } from './helpers';
 
 // Player falso: o teste verifica o que o app manda tocar, sem depender da rede do YouTube.
 const FAKE_API = `

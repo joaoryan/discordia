@@ -1,5 +1,5 @@
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
-import { createRoom, joinRoom, person } from './helpers';
+import { chromium, expect, type Browser, type Page } from '@playwright/test';
+import { createRoom, joinRoom, person, test } from './helpers';
 
 const report = (page: Page) => page.evaluate(async () => {
   const media = (window as any).session.media;
