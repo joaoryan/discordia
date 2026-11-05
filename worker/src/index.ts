@@ -8,6 +8,9 @@ interface Env {
   INBOXES: DurableObjectNamespace<Inbox>;
   ALLOWED_ORIGINS?: string;
   RATE_LIMIT_PER_MIN?: string;
+  EXPRESSTURN_SERVER?: string;
+  EXPRESSTURN_USER?: string;
+  EXPRESSTURN_PASS?: string;
   METERED_APP?: string;
   METERED_API_KEY?: string;
   TURN_KEY_ID?: string;
@@ -66,7 +69,33 @@ async function meteredServers(env: Env) {
   return servers;
 }
 
+type IceServer = { urls: string | string[]; username?: string; credential?: string };
+
+// ExpressTURN grátis: 1.000 GB/mês sem cartão, mas só na porta 3478 e com usuário e senha fixos.
+// Por isso o Worker precisa estar fechado ao domínio do site (ALLOWED_ORIGINS).
+function expressServers(env: Env): IceServer[] {
+  if (!env.EXPRESSTURN_SERVER || !env.EXPRESSTURN_USER || !env.EXPRESSTURN_PASS) return [];
+  const host = env.EXPRESSTURN_SERVER;
+  return [
+    { urls: `stun:${host}` },
+    {
+      urls: [`turn:${host}?transport=udp`, `turn:${host}?transport=tcp`],
+      username: env.EXPRESSTURN_USER,
+      credential: env.EXPRESSTURN_PASS,
+    },
+  ];
+}
+
 async function iceServers(env: Env) {
+  const express = expressServers(env);
+  if (express.length && env.METERED_APP && env.METERED_API_KEY) {
+    // A Metered fica só nas portas 443, para redes que barram a 3478. Com UDP disponível,
+    // o navegador prefere o relay do ExpressTURN, e a cota pequena da Metered sobra.
+    const metered = (await meteredServers(env)) as IceServer[];
+    const tls = Array.isArray(metered) ? metered.filter((s) => String(s.urls).includes(':443')) : [];
+    return [...express, ...tls];
+  }
+  if (express.length) return express;
   if (env.METERED_APP && env.METERED_API_KEY) return meteredServers(env);
   if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return FALLBACK_ICE;
   const res = await fetch(

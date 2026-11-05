@@ -22,6 +22,8 @@ new_sqlite_classes = ["Inbox"]
 
 [vars]
 # Origens permitidas, separadas por vírgula. Vazio libera tudo (só para desenvolvimento).
-ALLOWED_ORIGINS = ""
+ALLOWED_ORIGINS = "https://discordia-six.vercel.app,app://discordia"
 RATE_LIMIT_PER_MIN = "30"
 METERED_APP = "discordia-call"
+# Usuário e senha do ExpressTURN vão como segredos (EXPRESSTURN_USER e EXPRESSTURN_PASS).
+EXPRESSTURN_SERVER = "free.expressturn.com:3478"
