@@ -2,7 +2,7 @@
   import { normalizeCode, formatCode } from '../lib/code';
   import type { Profile } from '../lib/protocol';
   import { friends } from '../lib/friends.svelte';
-  import { loadRecent } from '../lib/settings';
+  import { loadRecent, type RecentRoom } from '../lib/settings';
   import { desktop } from '../lib/platform';
   import { allDownloads, downloadFor, latestVersion } from '../lib/download';
   import Avatar from './Avatar.svelte';
@@ -18,6 +18,7 @@
     invite,
     oncreate,
     onjoin,
+    onrecent,
     onprofile,
   }: {
     profile: Profile;
@@ -25,6 +26,7 @@
     invite: string;
     oncreate: (invitees: string[]) => void;
     onjoin: (code: string) => void;
+    onrecent: (room: RecentRoom) => void;
     onprofile: (p: Profile) => void;
   } = $props();
 
@@ -145,7 +147,7 @@
       {#if recent.length}
         <div class="rooms">
           {#each recent as room}
-            <button class="room" onclick={() => onjoin(room.code)}>
+            <button class="room" onclick={() => onrecent(room)}>
               <span class="room-icon" aria-hidden="true">{room.name.slice(0, 1).toUpperCase()}</span>
               <span class="room-text"><strong>{room.name}</strong><small>{when(room.at)}</small></span>
               <code>{formatCode(room.code)}</code>

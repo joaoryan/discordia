@@ -7,7 +7,7 @@ import { watchPressure, type Pressure } from './metrics';
 import { MediaEngine, type ScreenQuality } from './media';
 import { LIMITS, emptyVoice, type Attachment, type Channel, type ClientMsg, type HostMsg, type Member, type Message, type ModAction, type Profile, type RadioCmd, type RadioState, type VoiceState } from './protocol';
 import { clearRoom, saveRoom, type SavedRoom } from './roomStore';
-import { clientId, tabId, defaultUserAudio, loadSettings, rememberRoom, saveSettings, type Settings, type UserAudio } from './settings';
+import { clientId, tabId, defaultUserAudio, loadSettings, rememberRoom, saveSettings, type RecentRoom, type Settings, type UserAudio } from './settings';
 import { SIGNAL_ERRORS, SignalClient, fetchIceServers } from './signaling';
 import { playSound, setSoundOutput, type SoundId } from './sounds';
 
@@ -196,7 +196,38 @@ export class RoomSession {
 
     this.code = code;
     this.startHost(code, `Sala de ${this.profile.name}`);
-    rememberRoom(code, this.name);
+    rememberRoom(code, this.name, key);
+    window.addEventListener('pagehide', this.onPageHide);
+  }
+
+  /**
+   * Sala recente que este navegador criou. Se ainda estiver aberta (em outra aba, por exemplo),
+   * entra como convidado, sem tomá-la de quem hospeda. Se não estiver, reabre com o mesmo código
+   * e o mesmo nome, para os links antigos voltarem a funcionar. O histórico não volta.
+   */
+  async reopen(room: RecentRoom & { key: string }) {
+    this.code = room.code;
+    this.iceServers = await fetchIceServers();
+    this.media.iceServers = this.iceServers;
+    try {
+      await this.connectGuest();
+      return;
+    } catch (reason) {
+      const gone = [SIGNAL_ERRORS['host-offline'], SIGNAL_ERRORS['not-found']];
+      if (!gone.includes(String(reason))) return this.end(String(reason));
+    }
+
+    this.isHost = true;
+    this.hostKey = room.key;
+    try {
+      await this.connectHostSignal(room.code, room.key);
+    } catch (reason) {
+      // Alguém pegou o código depois que a sala acabou: abre uma sala nova.
+      if (reason === 'taken') return this.create();
+      return this.end(SIGNAL_ERRORS[String(reason)] ?? 'Não foi possível reabrir a sala.');
+    }
+    this.startHost(room.code, room.name);
+    rememberRoom(room.code, room.name, room.key);
     window.addEventListener('pagehide', this.onPageHide);
   }
 

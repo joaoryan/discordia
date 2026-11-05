@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { defaultSettings, loadSettings, saveSettings } from '../src/lib/settings';
+import { defaultSettings, loadRecent, loadSettings, rememberRoom, saveSettings } from '../src/lib/settings';
 
 const store = new Map<string, string>();
 vi.stubGlobal('localStorage', {
@@ -31,5 +31,19 @@ describe('ajustes salvos', () => {
     expect(s.micVolume).toBe(1.4);
     expect(s.sensitivity).toBe(0.05);
     expect('version' in s).toBe(false);
+  });
+});
+
+describe('salas recentes', () => {
+  beforeEach(() => store.clear());
+
+  it('guarda a chave de quem criou e não a perde ao entrar de novo', () => {
+    rememberRoom('ABCDEF', 'Sala de Ana', 'chave-de-dono');
+    rememberRoom('GHJKLM', 'Sala de Bia');
+    rememberRoom('ABCDEF', 'Sala de Ana'); // welcome do próprio host, sem chave
+    const [first, second] = loadRecent();
+    expect(first).toMatchObject({ code: 'ABCDEF', key: 'chave-de-dono' });
+    expect(second.code).toBe('GHJKLM');
+    expect(second).not.toHaveProperty('key');
   });
 });
