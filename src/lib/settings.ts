@@ -139,10 +139,16 @@ export interface RecentRoom {
   code: string;
   name: string;
   at: number;
+  /** Chave de dono, só nas salas que este navegador criou: deixa reabrir com o mesmo código. */
+  key?: string;
 }
 
 export const loadRecent = () => read<RecentRoom[]>(KEYS.recent) ?? [];
 
-export function rememberRoom(code: string, name: string) {
-  write(KEYS.recent, [{ code, name, at: Date.now() }, ...loadRecent().filter((r) => r.code !== code)].slice(0, 5));
+export function rememberRoom(code: string, name: string, key?: string) {
+  const list = loadRecent();
+  // Entrar de novo (até como host, pelo welcome) não pode apagar a chave guardada na criação.
+  const owned = key ?? list.find((r) => r.code === code)?.key;
+  const entry: RecentRoom = { code, name, at: Date.now(), ...(owned ? { key: owned } : {}) };
+  write(KEYS.recent, [entry, ...list.filter((r) => r.code !== code)].slice(0, 5));
 }

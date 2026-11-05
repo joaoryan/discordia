@@ -104,3 +104,41 @@ test('convidado que recarrega volta para a sala com o histórico', async ({ brow
   await expect(ana.getByText('antes de recarregar')).toBeVisible({ timeout: 20_000 });
   await expect((await members(host)).getByRole('heading')).toHaveText('Online — 2');
 });
+
+test('sala recente que eu criei reabre com o mesmo código depois de fechar a aba', async ({ browser }) => {
+  const ana = await person(browser, 'Ana');
+  const code = await createRoom(ana);
+  const tab = await ana.context().newPage();
+  await ana.close(); // a sala vivia nessa aba
+  await tab.goto('/');
+  await tab.getByRole('button', { name: new RegExp(code) }).click();
+
+  // Volta como host, com o mesmo código: o link antigo dos amigos funciona de novo.
+  await expect(tab.locator('main header .code code')).toHaveText(code, { timeout: 15_000 });
+  await expect(tab.locator('main header').getByRole('button', { name: 'Encerrar sala' })).toBeVisible();
+  const bia = await person(browser, 'Bia');
+  await joinRoom(bia, code);
+  await expect((await members(bia)).getByRole('heading')).toHaveText('Online — 2');
+});
+
+test('sala recente ainda aberta em outra aba: entra como convidado, sem tomar a sala', async ({ browser }) => {
+  const ana = await person(browser, 'Ana');
+  const code = await createRoom(ana);
+  const tab = await ana.context().newPage();
+  await tab.goto('/');
+  await tab.getByRole('button', { name: new RegExp(code) }).click();
+  await expect(tab.getByRole('textbox', { name: 'Mensagem' })).toBeVisible({ timeout: 20_000 });
+  await expect(tab.locator('main header').getByRole('button', { name: 'Encerrar sala' })).toHaveCount(0);
+  await expect((await members(ana)).getByRole('heading')).toHaveText('Online — 2');
+  await expect(ana.locator('main header').getByRole('button', { name: 'Encerrar sala' })).toBeVisible();
+});
+
+test('sala recente que eu encerrei também reabre', async ({ browser }) => {
+  const ana = await person(browser, 'Ana');
+  const code = await createRoom(ana);
+  await ana.locator('main header').getByRole('button', { name: 'Encerrar sala' }).click();
+  await ana.getByRole('dialog').getByRole('button', { name: 'Encerrar sala' }).click();
+  await ana.getByRole('button', { name: new RegExp(code) }).click();
+  await expect(ana.locator('main header .code code')).toHaveText(code, { timeout: 15_000 });
+  await expect(ana.locator('main header').getByRole('button', { name: 'Encerrar sala' })).toBeVisible();
+});

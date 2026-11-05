@@ -157,6 +157,10 @@
       void open((s) => s.create());
     }}
     onjoin={(code) => open((s) => s.join(code))}
+    onrecent={(room) => {
+      const { key } = room;
+      open((s) => (key ? s.reopen({ ...room, key }) : s.join(room.code)));
+    }}
     onprofile={setProfile}
   />
 {/if}
