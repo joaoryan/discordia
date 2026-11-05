@@ -90,6 +90,12 @@
               <Icon name="download" />
               <span>{message.attachment.name}<small>{formatBytes(message.attachment.size)}</small></span>
             </a>
+          {:else if message.attachment.lazy}
+            <!-- Quem entrou pelo TURN baixa cada anexo só quando pede: a cota do relay é pequena. -->
+            <button class="file lazy" onclick={() => session.loadAttachment(message.channel, message.id)}>
+              <Icon name="download" />
+              <span>Carregar {message.attachment.name}<small>{formatBytes(message.attachment.size)}</small></span>
+            </button>
           {:else}
             <p class="expired">Anexo expirado: {message.attachment.name}</p>
           {/if}
@@ -248,6 +254,13 @@
   .file small {
     display: block;
     color: var(--text-mute);
+  }
+
+  .lazy {
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
   }
 
   .expired {

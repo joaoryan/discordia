@@ -23,7 +23,19 @@
   let ping = $state<number | null>(null);
   let loss = $state(0);
   let encodeMs = $state<number | null>(null);
-  let rows = $state<{ name: string; relay: boolean; sends: string[]; gets: string[]; limit: string | null; codec: string | null }[]>([]);
+  let rows = $state<{ name: string; path: string; sends: string[]; gets: string[]; limit: string | null; codec: string | null }[]>([]);
+  let helping = $state(0);
+
+  const nameOf = (id: string) => session.members.find((m) => m.id === id)?.name ?? id;
+
+  /** Como a voz desta pessoa chega aqui: direto, por um amigo que repassa ou pelo TURN. */
+  function pathLabel(s: PeerStats) {
+    if (s.via) return `via ${nameOf(s.via)}`;
+    if (s.path === 'direct') return 'direto';
+    if (s.path === 'turn') return 'via TURN';
+    if (s.path === 'failed') return 'sem caminho direto';
+    return 'conectando';
+  }
 
   const pressure = $derived(session.pressure ? PRESSURE[session.pressure] : null);
   const memory = (navigator as any).deviceMemory as number | undefined;
@@ -60,9 +72,10 @@
       const spent = list.reduce((t, [id, s]) => t + s.encodeSeconds - (prev(id)?.encodeSeconds ?? s.encodeSeconds), 0);
       encodeMs = frames > 0 ? (spent / frames) * 1000 : null;
 
+      helping = session.media.helping;
       rows = list.map(([id, s]) => ({
-        name: session.members.find((m) => m.id === id)?.name ?? id,
-        relay: s.relay,
+        name: nameOf(id),
+        path: pathLabel(s),
         sends: s.videoOut,
         gets: s.videoIn,
         limit: s.limit,
@@ -105,12 +118,13 @@
     <dt>Perda de pacotes</dt>
     <dd class={loss > 3 ? 'warn' : ''}>{loss.toFixed(1)}%</dd>
     {#if encodeMs !== null}<dt>Codificação</dt><dd>{encodeMs.toFixed(1)} ms/quadro</dd>{/if}
+    {#if helping}<dt>Repassando</dt><dd>{helping} {helping === 1 ? 'par' : 'pares'}</dd>{/if}
   </dl>
 
   {#each rows as row}
     <div class="peer">
       <strong>{row.name}</strong>
-      <small>{row.relay ? 'via relay' : 'direto'}{row.codec ? ` · ${row.codec}` : ''}</small>
+      <small>{row.path}{row.codec ? ` · ${row.codec}` : ''}</small>
       {#each row.sends as item}<small>↑ {item}</small>{/each}
       {#each row.gets as item}<small>↓ {item}</small>{/each}
       {#if row.limit}<small class="warn">Limitado por {LIMITS[row.limit] ?? row.limit}</small>{/if}

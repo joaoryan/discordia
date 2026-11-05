@@ -42,6 +42,8 @@ export interface Settings {
   metrics: boolean;
   /** App de computador: mini janela por cima dos outros programas durante a chamada. */
   miniWindow: boolean;
+  /** Repassar a voz entre duas pessoas do canal que não se alcançam (docs/REPETIDOR.md). */
+  helpRelay: boolean;
 }
 
 export const defaultSettings: Settings = {
@@ -68,6 +70,7 @@ export const defaultSettings: Settings = {
   gameMode: false,
   metrics: false,
   miniWindow: true,
+  helpRelay: true,
 };
 
 function read<T>(key: string): T | null {

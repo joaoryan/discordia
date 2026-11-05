@@ -1,4 +1,5 @@
 // Contrato entre participantes e host. Tudo que vem da rede é tratado como não confiável.
+import type { LinkInfo, RelayPair } from './relayPlan';
 
 export const LIMITS = {
   members: 20,
@@ -25,6 +26,8 @@ export interface Attachment {
   type: string;
   size: number;
   data: string | null; // null quando expirou do histórico
+  /** Guardado no host e pedido sob demanda: quem entra pelo TURN não baixa o histórico todo. */
+  lazy?: boolean;
 }
 
 export interface Message {
@@ -113,7 +116,9 @@ export type ClientMsg =
   | { t: 'speaking'; on: boolean }
   | { t: 'radio'; radio: RadioCmd }
   | { t: 'rtc'; to: string; data: unknown }
-  | { t: 'mod'; mod: ModAction };
+  | { t: 'mod'; mod: ModAction }
+  | { t: 'links'; links: Record<string, LinkInfo>; help: boolean; mobile: boolean }
+  | { t: 'attachment'; channel: string; message: string };
 
 export interface RoomSnapshot {
   code: string;
@@ -145,7 +150,9 @@ export type HostMsg =
   | { t: 'notice'; text: string }
   | { t: 'host-reload' }
   | { t: 'kicked'; banned: boolean }
-  | { t: 'closed' };
+  | { t: 'closed' }
+  | { t: 'relay-plan'; pairs: RelayPair[] }
+  | { t: 'attachment'; channel: string; message: string; data: string | null };
 
 export const emptyVoice = (): VoiceState => ({
   channel: null,

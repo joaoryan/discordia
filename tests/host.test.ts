@@ -376,3 +376,69 @@ describe('perfil', () => {
     expect(cleanProfile({ name: 'Ana', avatar: '', color: '#123456', friend: 'A'.repeat(200) }).friend).toBeUndefined();
   });
 });
+
+describe('repetidor', () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(() => {
+    t = setup();
+    for (const id of ['h', 'a', 'b']) t.host.handle(id, { t: 'voice', state: voice('saguao') });
+    t.tick(5 * 60_000); // ninguém conta como recém-chegado
+    t.sent.length = 0;
+  });
+
+  const report = (from: string, links: Record<string, 'direct' | 'failed' | 'turn'>, help = true) =>
+    t.host.handle(from, { t: 'links', links: Object.fromEntries(Object.entries(links).map(([k, path]) => [k, { path, rtt: 30 }])), help, mobile: false });
+  const lastPlan = (id: string) => (t.to(id, 'relay-plan').at(-1)?.msg as Extract<HostMsg, { t: 'relay-plan' }> | undefined)?.pairs;
+
+  it('Ana e Bia bloqueadas: o host, que alcança as duas, repassa', () => {
+    report('h', { a: 'direct', b: 'direct' });
+    report('a', { h: 'direct', b: 'failed' });
+    expect(lastPlan('a')).toEqual([{ a: 'a', b: 'b', via: 'h' }]);
+    expect(lastPlan('h')).toEqual([{ a: 'a', b: 'b', via: 'h' }]);
+  });
+
+  it('repetidor sai do canal: o par vai para o TURN', () => {
+    report('h', { a: 'direct', b: 'direct' });
+    report('a', { h: 'direct', b: 'failed' });
+    t.host.handle('h', { t: 'voice', state: voice(null) });
+    expect(lastPlan('a')).toEqual([{ a: 'a', b: 'b', via: null }]);
+  });
+
+  it('quem desligou a ajuda não repassa', () => {
+    report('h', { a: 'direct', b: 'direct' }, false);
+    report('a', { h: 'direct', b: 'failed' });
+    expect(lastPlan('a')).toEqual([{ a: 'a', b: 'b', via: null }]);
+  });
+
+  it('só avisa quando o plano muda', () => {
+    report('h', { a: 'direct', b: 'direct' });
+    report('a', { h: 'direct', b: 'failed' });
+    const count = t.to('a', 'relay-plan').length;
+    report('a', { h: 'direct', b: 'failed' });
+    expect(t.to('a', 'relay-plan')).toHaveLength(count);
+  });
+
+  it('ignora caminhos inválidos e pessoas que não estão na sala', () => {
+    t.host.handle('a', { t: 'links', links: { b: { path: 'hackeado', rtt: 1 }, zz: { path: 'failed', rtt: 1 } } as any, help: true, mobile: false });
+    expect(lastPlan('a')).toBeUndefined();
+  });
+
+  it('quem entra pelo TURN recebe o histórico sem os anexos e pede cada um', () => {
+    const data = 'data:image/png;base64,AAAA';
+    t.host.handle('a', { t: 'chat', channel: 'geral', text: 'foto', attachment: { name: 'a.png', type: 'image/png', size: 3, data } });
+    t.host.admit('c', profile('Caio'), 'c-c', 'c-c', true);
+    const welcome = t.to('c', 'welcome')[0].msg as Extract<HostMsg, { t: 'welcome' }>;
+    const photo = welcome.room.history.find((m) => m.attachment)!;
+    expect(photo.attachment).toMatchObject({ data: null, lazy: true });
+    // O original fica intacto no host, para quem não está no TURN.
+    expect(t.host.history.get('geral')!.find((m) => m.attachment)!.attachment!.data).toBe(data);
+
+    t.host.handle('c', { t: 'attachment', channel: 'geral', message: photo.id });
+    expect(t.to('c', 'attachment')[0].msg).toMatchObject({ t: 'attachment', message: photo.id, data });
+
+    // Anexo novo também chega leve para quem está no TURN, e inteiro para os outros.
+    t.host.handle('a', { t: 'chat', channel: 'geral', text: 'outra', attachment: { name: 'b.png', type: 'image/png', size: 3, data } });
+    expect((t.to('c', 'chat').at(-1)!.msg as Extract<HostMsg, { t: 'chat' }>).message.attachment).toMatchObject({ data: null, lazy: true });
+    expect((t.to('b', 'chat').at(-1)!.msg as Extract<HostMsg, { t: 'chat' }>).message.attachment!.data).toBe(data);
+  });
+});
