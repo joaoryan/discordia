@@ -26,3 +26,15 @@ test('primeiro acesso, sala do host e responsividade', async ({ browser }) => {
   await page.getByRole('button', { name: 'Abrir canais' }).click();
   await expect(page.getByRole('button', { name: 'off-topic' })).toBeInViewport();
 });
+
+test('botão de baixar mostra a versão do último Release', async ({ browser }) => {
+  const page = await person(browser, 'Ana');
+  await expect(page.getByRole('link', { name: 'Baixar para Linux' })).toBeVisible(); // sem resposta, sem versão
+  await page.context().unrouteAll();
+  await page.context().route('https://api.github.com/repos/joaoryan/discordia/releases/latest', (route) =>
+    route.fulfill({ json: { tag_name: 'v9.8.7' }, headers: { 'Access-Control-Allow-Origin': '*' } }),
+  );
+  await page.reload();
+  const button = page.getByRole('link', { name: 'Baixar v9.8.7 para Linux' });
+  await expect(button).toHaveAttribute('href', /releases\/latest\/download\/Discordia-Linux\.AppImage$/);
+});

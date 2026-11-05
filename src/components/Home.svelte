@@ -4,7 +4,7 @@
   import { friends } from '../lib/friends.svelte';
   import { loadRecent } from '../lib/settings';
   import { desktop } from '../lib/platform';
-  import { allDownloads, downloadFor } from '../lib/download';
+  import { allDownloads, downloadFor, latestVersion } from '../lib/download';
   import Avatar from './Avatar.svelte';
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
@@ -37,6 +37,8 @@
   const shown = $derived(friends.sorted.slice(0, 6));
   // Dentro do próprio app não faz sentido oferecer o download.
   const app = desktop ? null : downloadFor(navigator.userAgent, (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform);
+  let appVersion = $state<string | null>(null);
+  if (app) void latestVersion().then((v) => (appVersion = v));
 
   function pick(address: string, on: boolean) {
     picked = on ? [...picked, address] : picked.filter((a) => a !== address);
@@ -96,7 +98,7 @@
 
       {#if app}
         <div class="get-app">
-          <a class="btn" href={app.url}><Icon name="download" size={18} /> Baixar para {app.os}</a>
+          <a class="btn" href={app.url}><Icon name="download" size={18} /> Baixar{appVersion ? ` v${appVersion}` : ""} para {app.os}</a>
           <small>Atalhos dentro do jogo e mini janela por cima. <a href={allDownloads} target="_blank" rel="noopener">Outros sistemas</a></small>
         </div>
       {/if}

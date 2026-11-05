@@ -7,6 +7,7 @@
   import MicTest from './components/MicTest.svelte';
   import ProfileForm from './components/ProfileForm.svelte';
   import Room from './components/Room.svelte';
+  import UpdateBanner from './components/UpdateBanner.svelte';
   import { normalizeCode } from './lib/code';
   import type { Profile } from './lib/protocol';
   import { RoomSession } from './lib/session.svelte';
@@ -166,6 +167,8 @@
   {/if}
   <Incoming room={session?.phase === 'open' ? { code: session.code } : null} onjoin={joinFromFriend} />
 {/if}
+
+{#if desktop}<UpdateBanner inCall={Boolean(session?.voice.channel)} />{/if}
 
 <style>
   .setup {

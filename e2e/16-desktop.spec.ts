@@ -106,3 +106,15 @@ test('fora de foco, a mini janela aparece e apertar para falar arma o hook globa
   await page.locator('main header').getByRole('button', { name: 'Encerrar sala' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Encerrar sala' }).click();
 });
+
+test('versão nova baixada aparece com o botão de reiniciar', async () => {
+  await app.evaluate(() => (globalThis as any).discordiaFakeUpdate('9.8.7'));
+  const banner = page.getByRole('status').filter({ hasText: 'Versão 9.8.7 pronta.' });
+  await expect(banner.getByRole('button', { name: 'Reiniciar e atualizar' })).toBeVisible();
+  await page.screenshot({ path: `${shots}/16-atualizacao.png` });
+  // A página recarregada pergunta de novo ao app, que lembra da versão baixada.
+  await page.reload();
+  await expect(banner).toBeVisible();
+  await banner.getByRole('button', { name: 'Depois' }).click();
+  await expect(banner).toBeHidden();
+});
