@@ -35,5 +35,8 @@ if (info) {
         listener(request.sources);
       }),
     pickSource: (choice: string | null) => ipcRenderer.send('pick-answer', { id: pickId, choice }),
+    getUpdate: () => ipcRenderer.invoke('update:get') as Promise<string | null>,
+    onUpdate: (listener: Listener<string>) => on('update-ready', listener),
+    installUpdate: () => ipcRenderer.send('update:install'),
   });
 }

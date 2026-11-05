@@ -22,6 +22,8 @@ export const test = base.extend<{ closeContexts: void }>({
 export async function person(browser: Browser, name: string) {
   const context = await browser.newContext({ permissions: ['microphone', 'camera', 'clipboard-read', 'clipboard-write'] });
   open.push(context);
+  // O botão de baixar consulta o último Release; os testes não dependem do GitHub.
+  await context.route('https://api.github.com/**', (route) => route.abort());
   const page = await context.newPage();
   page.on('console', (m) => m.text().includes('microfone indisponível') && console.log(`[${name}]`, m.text().slice(0, 160)));
   page.on('pageerror', (err) => console.log(`[${name}] erro:`, err.message));
