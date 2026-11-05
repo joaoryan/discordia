@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { downloadFor } from '../src/lib/download';
+import { downloadFor, parseVersion } from '../src/lib/download';
 
 describe('botão de baixar', () => {
   it('escolhe o instalador do sistema', () => {
@@ -13,5 +13,12 @@ describe('botão de baixar', () => {
     expect(downloadFor('Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537')).toBeNull();
     expect(downloadFor('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)')).toBeNull();
     expect(downloadFor('Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)')).toBeNull();
+  });
+
+  it('lê a versão da tag do Release', () => {
+    expect(parseVersion('v1.1.0')).toBe('1.1.0');
+    expect(parseVersion('2.0.10')).toBe('2.0.10');
+    expect(parseVersion('nightly')).toBeNull();
+    expect(parseVersion(undefined)).toBeNull();
   });
 });

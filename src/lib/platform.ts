@@ -42,6 +42,11 @@ export interface DesktopBridge {
   /** O app pede para a página escolher o que compartilhar; a resposta vai por `pickSource`. */
   onPickSource(listener: (sources: ScreenSource[]) => void): () => void;
   pickSource(id: string | null): void;
+  /** Versão nova já baixada e pronta para instalar, ou null. */
+  getUpdate(): Promise<string | null>;
+  onUpdate(listener: (version: string) => void): () => void;
+  /** Fecha o app, instala a versão baixada e abre de novo. */
+  installUpdate(): void;
 }
 
 export const desktop: DesktopBridge | undefined = (globalThis as { desktop?: DesktopBridge }).desktop;

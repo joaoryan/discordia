@@ -36,6 +36,8 @@ const PICK_TIMEOUT_MS = 120_000;
 // Compacta: uma pílula com rostos. Expandida: lista de nomes e controles.
 const MINI_MIN = { width: 96, height: 34 };
 const MINI_MAX = { width: 260, height: 420 };
+// O app costuma ficar dias aberto na bandeja: procura versão nova de tempos em tempos, não só ao abrir.
+const UPDATE_CHECK_MS = 4 * 60 * 60 * 1000;
 
 // A mesma CSP do site (gerada de vercel.json no build). Em desenvolvimento libera a sinalização local.
 const CSP = (() => {
@@ -70,9 +72,17 @@ let pttRunning = false;
 let hook: typeof import('uiohook-napi') | null = null;
 const picks = new Map<number, (id: string | null) => void>();
 let pickSeq = 0;
+/** Versão nova já baixada, esperando o usuário reiniciar (ou o app fechar). */
+let updateReady: string | null = null;
 
 // Estado do hook para os testes de ponta a ponta (só fora do app empacotado).
-if (!app.isPackaged) Object.assign(globalThis, { discordiaPtt: () => ({ key: pttKey, running: pttRunning }) });
+if (!app.isPackaged) {
+  Object.assign(globalThis, {
+    discordiaPtt: () => ({ key: pttKey, running: pttRunning }),
+    // Simula uma atualização baixada, sem depender de um Release de verdade.
+    discordiaFakeUpdate: (version: string) => announceUpdate(version),
+  });
+}
 
 // Dados do app em ~/.config/Discordia (ou equivalente). Os testes usam uma pasta descartável.
 app.setName('Discordia');
@@ -113,7 +123,21 @@ async function start() {
   createWindow(process.argv.includes('--hidden'));
   createTray();
   registerIpc();
-  if (app.isPackaged) autoUpdater.checkForUpdatesAndNotify().catch((err) => console.warn('atualização', err));
+  startUpdates();
+}
+
+/** Baixa a versão nova em segundo plano e avisa a página, que oferece reiniciar na hora. */
+function startUpdates() {
+  if (!app.isPackaged) return;
+  autoUpdater.on('update-downloaded', (info) => announceUpdate(info.version));
+  const check = () => autoUpdater.checkForUpdates().catch((err) => console.warn('atualização', err));
+  void check();
+  setInterval(check, UPDATE_CHECK_MS);
+}
+
+function announceUpdate(version: string) {
+  updateReady = version;
+  win?.webContents.send('update-ready', version);
 }
 
 /** Serve a build do site em app://discordia, com a CSP do site e sem sair da pasta. */
@@ -420,6 +444,14 @@ function registerIpc() {
 
   ipcMain.on('info', (e) => {
     e.returnValue = fromApp(e) ? { version: app.getVersion(), platform: process.platform, systemAudio: process.platform === 'win32' } : null;
+  });
+  ipcMain.handle('update:get', (e) => (fromApp(e) ? updateReady : null));
+  ipcMain.on('update:install', (e) => {
+    if (!fromApp(e) || !updateReady) return;
+    quitting = true;
+    // Sem Release de verdade (testes), só fecha.
+    if (app.isPackaged) autoUpdater.quitAndInstall();
+    else app.quit();
   });
   ipcMain.on('ptt-key', (e, code: unknown) => fromApp(e) && setPushToTalk(typeof code === 'string' ? code : null));
   ipcMain.on('mini', (e, on: unknown) => {
