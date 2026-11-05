@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { createRoom, joinRoom, person, shots } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { createRoom, joinRoom, person, shots, test } from './helpers';
 
 const liveVideo = (page: Page, label: string) =>
   page.locator(`[data-label="${label}"] video`).evaluate(

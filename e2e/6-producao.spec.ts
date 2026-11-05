@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { createRoom, joinRoom, person, say } from './helpers';
+import { expect } from '@playwright/test';
+import { createRoom, joinRoom, person, say, test } from './helpers';
 
 test('build de produção funciona sob a CSP real', async ({ browser }) => {
   const host = await person(browser, 'Host');

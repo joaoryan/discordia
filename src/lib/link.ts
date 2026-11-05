@@ -44,6 +44,22 @@ export class Link {
     };
   }
 
+  /** A conexão passa pelo TURN? Aí o host economiza o que manda, como os anexos do histórico. */
+  async relayed() {
+    try {
+      const report = await this.pc.getStats();
+      let relay = false;
+      report.forEach((entry: any) => {
+        if (entry.type !== 'candidate-pair' || !entry.nominated || entry.state !== 'succeeded') return;
+        const types = [report.get(entry.localCandidateId)?.candidateType, report.get(entry.remoteCandidateId)?.candidateType];
+        relay ||= types.includes('relay');
+      });
+      return relay;
+    } catch {
+      return false;
+    }
+  }
+
   async call() {
     await this.pc.setLocalDescription(await this.pc.createOffer());
     this.on.signal({ sdp: this.pc.localDescription });

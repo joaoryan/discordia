@@ -17,6 +17,8 @@ const RECONNECT_DELAY_MS = 2_000;
 const MESH_GRACE_MS = 15_000; // tempo para os outros convidados voltarem à sala
 const RESUME_GRACE_MS = 30_000;
 const TYPING_MS = 3_000;
+const LINKS_REPORT_MS = 15_000; // atraso de cada ligação, para o host escolher bem os repetidores
+const LINKS_DEBOUNCE_MS = 300;
 const HOST_INBOUND = 4 * 1024 * 1024;
 const GUEST_INBOUND = 128 * 1024 * 1024;
 
@@ -68,6 +70,8 @@ export class RoomSession {
   private joining = false;
   private mutedBeforeDeafen = false;
   private stopPressure = () => {};
+  private linksTimer = 0;
+  private linksBeat = 0;
 
   private host: RoomHost | null = null;
   private signal: SignalClient | null = null;
@@ -105,6 +109,7 @@ export class RoomSession {
         this.pushVoice({ muted: true });
       },
       cameraLost: () => void this.toggleCamera(),
+      paths: () => this.scheduleLinks(),
     },
     () => this.settings,
   );
@@ -118,6 +123,26 @@ export class RoomSession {
       this.pressure = state;
       if (this.lite && !before) this.toast('Computador sobrecarregado: modo economia ativado.');
     });
+    this.media.blocked = testBlock(this);
+    this.linksBeat = window.setInterval(() => void this.reportLinks(), LINKS_REPORT_MS);
+  }
+
+  // --- Repetidor ---
+
+  /** Várias ligações mudam juntas ao entrar no canal: um relatório só. */
+  private scheduleLinks() {
+    clearTimeout(this.linksTimer);
+    this.linksTimer = window.setTimeout(() => void this.reportLinks(), LINKS_DEBOUNCE_MS);
+  }
+
+  private async reportLinks() {
+    if (!this.voice.channel || this.phase !== 'open') return;
+    const links = await this.media.linkReport();
+    this.send({ t: 'links', links, help: this.settings.helpRelay, mobile: isMobile() });
+  }
+
+  loadAttachment(channel: string, message: string) {
+    this.send({ t: 'attachment', channel, message });
   }
 
   /** Economia manual ou automática, quando o computador está sob pressão. */
@@ -268,7 +293,10 @@ export class RoomSession {
         const old = this.links.get(id);
         this.links.set(id, link);
         if (old !== link) old?.close();
-        this.host?.admit(id, msg.profile, String(msg.clientId), tab);
+        // Pelo TURN, o histórico vai sem os dados dos anexos: cada um é pedido quando aberto.
+        void link.relayed().then((lean) => {
+          if (this.links.get(id) === link) this.host?.admit(id, msg.profile, String(msg.clientId), tab, lean);
+        });
       },
       close: () => {
         pending.delete(link);
@@ -470,6 +498,13 @@ export class RoomSession {
       case 'closed':
         this.play('alert');
         return this.end('A sala foi encerrada pelo host.');
+      case 'relay-plan':
+        return this.media.setRelayPlan(msg.pairs);
+      case 'attachment': {
+        const target = this.messages[msg.channel]?.find((m) => m.id === msg.message);
+        if (target?.attachment) Object.assign(target.attachment, { data: msg.data, lazy: false });
+        return;
+      }
     }
   }
 
@@ -782,6 +817,7 @@ export class RoomSession {
     if (outputChanged) setSoundOutput(this.settings.speakerId);
     if (cameraChanged) void this.media.switchCamera().catch(() => this.toast('Não foi possível trocar a câmera.'));
     if (voiceTuned) this.media.updateMicOptions();
+    if ('helpRelay' in patch) void this.reportLinks();
     if (micChanged) void this.media.switchMic().catch(() => this.toast('Não foi possível trocar o microfone.'));
   }
 
@@ -832,6 +868,8 @@ export class RoomSession {
     window.removeEventListener('pagehide', this.onPageHide);
     navigator.mediaDevices?.removeEventListener('devicechange', this.onDeviceChange);
     this.stopPressure();
+    clearInterval(this.linksBeat);
+    clearTimeout(this.linksTimer);
     if (this.host) {
       this.host.close();
       this.signal?.closeRoom();
@@ -848,4 +886,29 @@ export class RoomSession {
     this.phase = 'ended';
     this.close();
   }
+}
+
+function isMobile() {
+  const data = (navigator as { userAgentData?: { mobile?: boolean } }).userAgentData;
+  return data?.mobile ?? /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+}
+
+/**
+ * Só para testes: `localStorage['discordia.testBlock'] = '["Ana","Bia"]'` faz essas pessoas
+ * não se alcançarem direto, como duas casas atrás do mesmo CGNAT.
+ */
+function testBlock(session: RoomSession): (id: string) => boolean {
+  let names: string[] = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem('discordia.testBlock') ?? '[]');
+    if (Array.isArray(parsed)) names = parsed.map(String);
+  } catch {
+    // Sem armazenamento: nada bloqueado.
+  }
+  if (names.length < 2) return () => false;
+  return (id) => {
+    const me = session.me?.name;
+    const other = session.members.find((m) => m.id === id)?.name;
+    return !!me && !!other && me !== other && names.includes(me) && names.includes(other);
+  };
 }

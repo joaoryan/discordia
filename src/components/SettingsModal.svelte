@@ -160,6 +160,7 @@
           <label class="option-row"><input type="checkbox" class="switch" checked={session.settings.echoCancellation} onchange={(e) => session.updateSettings({ echoCancellation: e.currentTarget.checked })} /> Cancelamento de eco</label>
           <label class="option-row"><input type="checkbox" class="switch" checked={session.settings.autoGainControl} onchange={(e) => session.updateSettings({ autoGainControl: e.currentTarget.checked })} /> Ganho automático</label>
           <label class="option-row"><input type="checkbox" class="switch" checked={session.settings.gameMode} onchange={() => session.toggleGameMode()} /> Modo jogo: só voz, sem receber vídeo</label>
+          <label class="option-row"><input type="checkbox" class="switch" checked={session.settings.helpRelay} onchange={(e) => session.updateSettings({ helpRelay: e.currentTarget.checked })} /> Ajudar a conectar: repassa a voz entre duas pessoas do canal que a rede impede de se falarem direto</label>
         </div>
       {:else if tab === 'video'}
         <h2>Vídeo</h2>

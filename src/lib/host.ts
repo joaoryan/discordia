@@ -16,6 +16,7 @@ import {
   type Track,
   type VoiceState,
 } from './protocol';
+import { planRelays, type LinkInfo, type PathState, type RelayPair } from './relayPlan';
 
 const CHAT_BURST = 10;
 const CHAT_REFILL_MS = 1000;
@@ -25,6 +26,14 @@ const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const MAX_CHANNELS = 24;
 const MAX_QUEUE = 200;
 const VIDEO_ID = /^[\w-]{11}$/;
+const PATHS: PathState[] = ['checking', 'direct', 'failed', 'turn'];
+const DROP_WINDOW_MS = 10 * 60_000;
+
+/** Quem entrou pelo TURN recebe os anexos só quando pede: o histórico pode passar de 30 MB. */
+function leanMessage(message: Message): Message {
+  if (!message.attachment?.data) return message;
+  return { ...message, attachment: { ...message.attachment, data: null, lazy: true } };
+}
 
 interface Conn {
   clientId: string; // navegador: vale para banimento
@@ -104,6 +113,13 @@ export class RoomHost {
   private known = new Set<string>(); // clientes já aceitos: voltam mesmo com a sala trancada
   private graceUntil = 0; // enquanto os membros voltam, ninguém conta como ausente
   private now: () => number;
+  // Repetidor: o mapa de quem alcança quem e o plano atual (src/lib/relayPlan.ts).
+  private links = new Map<string, Record<string, LinkInfo>>();
+  private helpers = new Map<string, { help: boolean; mobile: boolean }>();
+  private voiceSince = new Map<string, number>();
+  private voiceDrops = new Map<string, number[]>();
+  private plan: RelayPair[] = [];
+  private lean = new Set<string>();
 
   constructor(private opts: HostOptions) {
     this.now = opts.now ?? Date.now;
@@ -148,14 +164,18 @@ export class RoomHost {
   }
 
   private broadcast(msg: HostMsg, except?: string) {
-    for (const id of this.members.keys()) if (id !== except) this.opts.send(id, msg);
+    for (const id of this.members.keys()) {
+      if (id === except) continue;
+      this.opts.send(id, msg.t === 'chat' && this.lean.has(id) ? { ...msg, message: leanMessage(msg.message) } : msg);
+    }
   }
 
   private publicMembers() {
     return [...this.members.values()];
   }
 
-  admit(id: string, profile: Profile, clientId: string, tab = clientId) {
+  /** `lean`: a conexão com este convidado passa pelo TURN, então os anexos vão sob demanda. */
+  admit(id: string, profile: Profile, clientId: string, tab = clientId, lean = false) {
     const isHost = id === this.opts.hostId;
     const refuse = (reason: string) => {
       this.opts.send(id, { t: 'refused', reason });
@@ -186,6 +206,9 @@ export class RoomHost {
     };
     this.members.set(id, member);
     this.conns.set(id, { clientId, tab, tokens: CHAT_BURST, lastRefill: this.now() });
+    if (lean && !isHost) this.lean.add(id);
+    else this.lean.delete(id);
+    const history = [...this.history.values()].flat();
 
     this.opts.send(id, {
       t: 'welcome',
@@ -195,7 +218,7 @@ export class RoomHost {
         name: this.opts.name,
         channels: this.channels,
         members: this.publicMembers(),
-        history: [...this.history.values()].flat(),
+        history: this.lean.has(id) ? history.map(leanMessage) : history,
         locked: this.locked,
         radio: this.radioView(),
       },
@@ -209,8 +232,14 @@ export class RoomHost {
     if (!member) return;
     this.members.delete(id);
     this.conns.delete(id);
+    this.lean.delete(id);
+    this.links.delete(id);
+    this.helpers.delete(id);
+    this.voiceSince.delete(id);
+    this.voiceDrops.delete(id);
     this.broadcast({ t: 'member-leave', id });
     this.reviewRadio();
+    this.replan();
     this.post(this.channels.find((c) => c.kind === 'text')?.id, `${member.name} saiu da sala.`);
   }
 
@@ -314,7 +343,57 @@ export class RoomHost {
       case 'mod':
         if (from === this.opts.hostId) this.onMod(msg.mod);
         return;
+      case 'links':
+        return this.onLinks(member, msg);
+      case 'attachment': {
+        const data = this.history.get(msg.channel)?.find((m) => m.id === msg.message)?.attachment?.data ?? null;
+        if (!this.allowChat(from)) return;
+        return this.opts.send(from, { t: 'attachment', channel: String(msg.channel), message: String(msg.message), data });
+      }
     }
+  }
+
+  // --- Repetidor ---
+
+  private onLinks(member: Member, msg: Extract<ClientMsg, { t: 'links' }>) {
+    const clean: Record<string, LinkInfo> = {};
+    for (const [peer, info] of Object.entries(msg.links ?? {})) {
+      if (peer === member.id || !this.members.has(peer) || !PATHS.includes(info?.path)) continue;
+      const rtt = Number(info.rtt);
+      clean[peer] = { path: info.path, rtt: Number.isFinite(rtt) && rtt >= 0 ? Math.min(rtt, 5000) : null };
+    }
+    this.links.set(member.id, clean);
+    this.helpers.set(member.id, { help: msg.help !== false, mobile: Boolean(msg.mobile) });
+    this.replan();
+  }
+
+  /** Recalcula quem repassa para quem e avisa a sala só quando o plano muda. */
+  private replan() {
+    const now = this.now();
+    const members = this.publicMembers().map((m) => ({
+      id: m.id,
+      channel: m.voice.channel,
+      help: this.helpers.get(m.id)?.help ?? false,
+      mobile: this.helpers.get(m.id)?.mobile ?? false,
+      since: this.voiceSince.get(m.id) ?? now,
+      drops: (this.voiceDrops.get(m.id) ?? []).filter((at) => now - at < DROP_WINDOW_MS).length,
+    }));
+    const next = planRelays({ members, links: Object.fromEntries(this.links), previous: this.plan, now });
+    if (JSON.stringify(next) === JSON.stringify(this.plan)) return;
+    this.plan = next;
+    this.broadcast({ t: 'relay-plan', pairs: next });
+  }
+
+  /** Marca a entrada e a saída da voz: quem acabou de chegar ou cai muito é um repetidor pior. */
+  private trackVoice(member: Member, channel: string | null) {
+    if (member.voice.channel === channel) return;
+    const now = this.now();
+    if (member.voice.channel) {
+      const drops = (this.voiceDrops.get(member.id) ?? []).filter((at) => now - at < DROP_WINDOW_MS);
+      this.voiceDrops.set(member.id, [...drops, now]);
+    }
+    this.voiceSince.set(member.id, now);
+    this.links.delete(member.id); // as ligações do canal antigo não valem no novo
   }
 
   private onChat(member: Member, msg: Extract<ClientMsg, { t: 'chat' }>) {
@@ -374,6 +453,7 @@ export class RoomHost {
         return;
       }
     }
+    this.trackVoice(member, channel?.id ?? null);
     member.voice = {
       channel: channel?.id ?? null,
       muted: Boolean(state?.muted),
@@ -386,6 +466,8 @@ export class RoomHost {
     if (!channel) member.speaking = false;
     this.broadcast({ t: 'member-update', member });
     this.reviewRadio();
+    this.replan();
+    if (channel && this.plan.length) this.opts.send(member.id, { t: 'relay-plan', pairs: this.plan });
   }
 
   // --- Rádio: a sala guarda só fila e posição; o áudio nunca passa pelo host. ---
@@ -547,11 +629,13 @@ export class RoomHost {
       case 'disconnect': {
         const member = this.members.get(mod.id);
         if (!member?.voice.channel) return;
+        this.trackVoice(member, null);
         member.voice = emptyVoice();
         member.speaking = false;
         this.opts.send(mod.id, { t: 'notice', text: 'O host desconectou você da voz.' });
         this.broadcast({ t: 'member-update', member });
-        return this.reviewRadio();
+        this.reviewRadio();
+        return this.replan();
       }
       case 'lock':
         this.locked = Boolean(mod.locked);
@@ -570,13 +654,15 @@ export class RoomHost {
         this.history.delete(mod.id);
         for (const member of this.members.values()) {
           if (member.voice.channel === mod.id) {
+            this.trackVoice(member, null);
             member.voice = emptyVoice();
             member.speaking = false;
             this.broadcast({ t: 'member-update', member });
           }
         }
         this.broadcast({ t: 'channels', channels: this.channels });
-        return this.reviewRadio();
+        this.reviewRadio();
+        return this.replan();
       }
     }
   }

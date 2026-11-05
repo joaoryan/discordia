@@ -1,5 +1,5 @@
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
-import { createRoom, joinRoom, members, person, shots } from './helpers';
+import { chromium, expect, type Browser, type Page } from '@playwright/test';
+import { createRoom, joinRoom, members, person, shots, test } from './helpers';
 
 // Navegador próprio: a suíte passa dezenas de pessoas pelo mesmo processo e esgota as capturas de áudio.
 let own: Browser;

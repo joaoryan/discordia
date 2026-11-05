@@ -1,6 +1,7 @@
 // Áudio, vídeo e tela em malha. Cada par só existe enquanto os dois estão no mesmo canal de voz.
 import { LIMITS } from './protocol';
 import { MicChain, createVoiceContext, type MicOptions, type MicState } from './micChain';
+import type { LinkInfo, PathState, RelayPair } from './relayPlan';
 import type { Settings } from './settings';
 
 export type ScreenQuality = 'detail' | 'motion' | 'full'; // | 'high'
@@ -16,6 +17,13 @@ export const SCREEN = {
 
 const MIC_RETRY_MS = 600;
 const MUSIC_BITRATE = 128_000;
+/** Sem conectar nesse tempo, o caminho direto é dado como bloqueado e o host procura um repetidor. */
+const DIRECT_TIMEOUT_MS = 6_000;
+const PREDICT_MS = 2_500;
+// Pelo TURN cada byte gasta a cota: voz, música e tela vão mais leves só nesses pares.
+const TURN_VOICE_BITRATE = 24_000;
+const TURN_MUSIC_BITRATE = 64_000;
+const TURN_SCREEN_BITRATE = 1_000_000;
 
 // Upload total é N-1 × bitrate, então o vídeo perde qualidade conforme a sala cresce.
 function cameraEncoding(peers: number, lite: boolean): RTCRtpEncodingParameters {
@@ -71,6 +79,8 @@ export interface MediaEvents {
   watchRefused: (peer: string) => void;
   micLost: () => void;
   cameraLost: () => void;
+  /** Alguma ligação mudou de caminho: o host precisa saber para replanejar os repetidores. */
+  paths: () => void;
 }
 
 export interface PeerStats {
@@ -87,6 +97,37 @@ export interface PeerStats {
   encodeSeconds: number;
   framesEncoded: number;
   codec: string | null;
+  path: PathState;
+  /** Quem está repassando a voz desta pessoa até aqui, quando o caminho direto não existe. */
+  via: string | null;
+}
+
+/** IPs só com STUN: tentar direto não gasta cota. O TURN entra só quando o host manda. */
+export function stunOnly(servers: RTCIceServer[]): RTCIceServer[] {
+  const out: RTCIceServer[] = [];
+  for (const server of servers) {
+    const urls = (Array.isArray(server.urls) ? server.urls : [server.urls]).filter((url) => url.startsWith('stun:'));
+    if (urls.length) out.push({ urls });
+  }
+  return out;
+}
+
+/** Endereço de um candidato "srflx": é o IP público com que a operadora mostra este lado. */
+export function publicAddress(candidate: string | undefined) {
+  const parts = (candidate ?? '').split(' ');
+  const typ = parts.indexOf('typ');
+  return typ > 0 && parts[typ + 1] === 'srflx' ? parts[4] : null;
+}
+
+interface PeerEnv {
+  events: MediaEvents;
+  ice: () => RTCIceServer[];
+  gameMode: () => boolean;
+  /** Só para testes: finge que a rede bloqueia o caminho direto com esta pessoa. */
+  blocked: (id: string) => boolean;
+  onStable: (peer: MeshPeer) => void;
+  onPath: (peer: MeshPeer) => void;
+  onStreams: (peer: MeshPeer) => void;
 }
 
 class MeshPeer {
@@ -94,29 +135,43 @@ class MeshPeer {
   streams: MediaStream[] = [];
   /** Lado educado só publica depois da primeira negociação; veja ensurePeer. */
   open: boolean;
+  /** Como esta ligação está: tentando, direta, sem caminho direto ou pelo TURN. */
+  path: PathState = 'checking';
+  /** O TURN foi liberado nesta ligação, porque ninguém da sala consegue repassar. */
+  turn = false;
+  /**
+   * A tentativa direta desistiu de verdade (tempo esgotado ou falha do ICE). A previsão só
+   * antecipa o repetidor, que é grátis; o TURN espera esta confirmação.
+   */
+  gaveUp = false;
   private makingOffer = false;
   private ignoreOffer = false;
   private applyingAnswer = false;
   private pendingIce: RTCIceCandidateInit[] = [];
+  private localIps = new Set<string>();
+  private remoteIps = new Set<string>();
+  private timers: number[] = [];
 
   constructor(
-    private id: string,
+    public id: string,
     private polite: boolean,
-    iceServers: RTCIceServer[],
-    private events: MediaEvents,
-    private gameMode: () => boolean,
-    onStable: () => void,
+    private env: PeerEnv,
   ) {
     this.open = !polite;
-    this.pc = new RTCPeerConnection({ iceServers });
-    this.pc.onicecandidate = (ev) => ev.candidate && events.signal(id, { ice: ev.candidate });
+    this.pc = new RTCPeerConnection({ iceServers: stunOnly(env.ice()) });
+    this.pc.onicecandidate = (ev) => {
+      if (!ev.candidate || env.blocked(id)) return;
+      const ip = publicAddress(ev.candidate.candidate);
+      if (ip) this.localIps.add(ip);
+      env.events.signal(id, { ice: ev.candidate });
+    };
 
     // Perfect Negotiation: resolve ofertas simultâneas ao ligar câmera ou tela.
     this.pc.onnegotiationneeded = async () => {
       try {
         this.makingOffer = true;
         await this.pc.setLocalDescription();
-        events.signal(id, { sdp: this.pc.localDescription });
+        env.events.signal(id, { sdp: this.pc.localDescription });
       } catch (err) {
         console.warn('falha ao negociar', err);
       } finally {
@@ -124,21 +179,91 @@ class MeshPeer {
       }
     };
     this.pc.onsignalingstatechange = () => {
-      if (this.pc.signalingState === 'stable') onStable();
+      if (this.pc.signalingState === 'stable') env.onStable(this);
     };
-    this.pc.oniceconnectionstatechange = () => {
-      if (this.pc.iceConnectionState === 'failed') this.pc.restartIce();
-    };
+    this.pc.oniceconnectionstatechange = () => this.onIceState();
     this.pc.ontrack = (ev) => {
       const stream = ev.streams[0];
       if (!stream) return;
       stream.onremovetrack = () => {
         if (stream.getTracks().length === 0) this.streams = this.streams.filter((s) => s !== stream);
-        events.streams(id, this.streams);
+        env.onStreams(this);
       };
       if (!this.streams.includes(stream)) this.streams = [...this.streams, stream];
-      events.streams(id, this.streams);
+      env.onStreams(this);
     };
+    this.timers.push(
+      window.setTimeout(() => this.predict(), PREDICT_MS),
+      window.setTimeout(() => this.giveUp(), DIRECT_TIMEOUT_MS),
+    );
+  }
+
+  private setPath(path: PathState) {
+    if (this.path === path) return;
+    this.path = path;
+    this.env.onPath(this);
+  }
+
+  private onIceState() {
+    const state = this.pc.iceConnectionState;
+    if (state === 'connected' || state === 'completed') void this.settle();
+    else if (state === 'failed') {
+      // Com TURN liberado, tenta de novo como sempre; sem ele, é a deixa para chamar um repetidor.
+      if (this.turn) this.pc.restartIce();
+      else this.confirmFailure();
+    }
+  }
+
+  private confirmFailure() {
+    const changed = !this.gaveUp || this.path !== 'failed';
+    this.gaveUp = true;
+    this.path = 'failed';
+    if (changed) this.env.onPath(this);
+  }
+
+  /** Conectou: direto ou pelo relay do TURN? */
+  private async settle() {
+    let relay = false;
+    try {
+      const report = await this.pc.getStats();
+      report.forEach((entry: any) => {
+        if (entry.type !== 'candidate-pair' || !entry.nominated || entry.state !== 'succeeded') return;
+        const types = [report.get(entry.localCandidateId)?.candidateType, report.get(entry.remoteCandidateId)?.candidateType];
+        relay ||= types.includes('relay');
+      });
+    } catch {
+      // Ligação fechada no meio da leitura.
+    }
+    const state = this.pc.iceConnectionState;
+    if (state === 'connected' || state === 'completed') this.setPath(relay ? 'turn' : 'direct');
+  }
+
+  /**
+   * Mesmo IP público dos dois lados e nada conectou ainda: são duas casas atrás do mesmo
+   * CGNAT, que não devolve o tráfego para dentro. Na mesma casa, o caminho local já teria ligado.
+   */
+  private predict() {
+    if (this.path !== 'checking' || this.turn) return;
+    // A operadora pode sair por IPs vizinhos: o mesmo bloco /24 também conta.
+    const block = (ip: string) => (ip.includes('.') ? ip.split('.').slice(0, 3).join('.') : ip);
+    const remote = new Set([...this.remoteIps].map(block));
+    if ([...this.localIps].some((ip) => remote.has(block(ip)))) this.setPath('failed');
+  }
+
+  private giveUp() {
+    if ((this.path === 'checking' || this.path === 'failed') && !this.turn) this.confirmFailure();
+  }
+
+  /** Último caso: ninguém da sala consegue repassar, então este par passa a usar o TURN. */
+  escalate() {
+    if (this.turn) return;
+    this.turn = true;
+    try {
+      this.pc.setConfiguration({ ...this.pc.getConfiguration(), iceServers: this.env.ice() });
+      this.pc.restartIce();
+    } catch (err) {
+      console.warn('não foi possível liberar o TURN', err);
+    }
   }
 
   async signal(data: { sdp?: RTCSessionDescriptionInit; ice?: RTCIceCandidateInit }) {
@@ -151,14 +276,21 @@ class MeshPeer {
         this.ignoreOffer = !this.polite && collision;
         if (this.ignoreOffer) return;
         this.applyingAnswer = data.sdp.type === 'answer';
-        const remote = this.gameMode() && data.sdp.sdp ? { type: data.sdp.type, sdp: tuneForGame(data.sdp.sdp) } : data.sdp;
+        // Pelo TURN a voz vai mais leve, como no modo jogo: cada byte ali gasta a cota.
+        const tune = (this.env.gameMode() || this.turn) && data.sdp.sdp;
+        let remote = tune ? { type: data.sdp.type, sdp: tuneForGame(data.sdp.sdp!) } : data.sdp;
+        // Renegociações trazem os candidatos dentro da própria descrição: o bloqueio de teste tira dali também.
+        if (this.env.blocked(this.id) && remote.sdp) remote = { type: remote.type, sdp: remote.sdp.replace(/a=(candidate|end-of-candidates).*\r?\n/g, '') };
         await this.pc.setRemoteDescription(remote).finally(() => (this.applyingAnswer = false));
         await this.flushIce();
         if (data.sdp.type === 'offer') {
           await this.pc.setLocalDescription();
-          this.events.signal(this.id, { sdp: this.pc.localDescription });
+          this.env.events.signal(this.id, { sdp: this.pc.localDescription });
         }
       } else if (data.ice) {
+        if (this.env.blocked(this.id)) return;
+        const ip = publicAddress(data.ice.candidate);
+        if (ip) this.remoteIps.add(ip);
         if (this.pc.remoteDescription) await this.pc.addIceCandidate(data.ice);
         else this.pendingIce.push(data.ice);
       }
@@ -176,6 +308,7 @@ class MeshPeer {
   }
 
   close() {
+    this.timers.forEach((t) => clearTimeout(t));
     this.pc.close();
   }
 }
@@ -206,8 +339,48 @@ export class MediaEngine {
   private lite = false;
   selfId = '';
   iceServers: RTCIceServer[] = [];
+  /** Só para testes: pessoas com quem a rede "bloqueia" o caminho direto. */
+  blocked: (id: string) => boolean = () => false;
 
-  constructor(private events: MediaEvents, private settings: () => Settings) {}
+  // Repetidor (docs/REPETIDOR.md).
+  private plan: RelayPair[] = [];
+  /** Sentidos que este lado repassa, como "origem>destino". */
+  private relaying = new Set<string>();
+  private forwards = new Map<string, Map<MediaStreamTrack, RTCRtpSender>>();
+  private announced = new Map<string, Set<string>>();
+  /** "repetidor:stream" → de quem é aquele áudio. */
+  private relayedIn = new Map<string, string>();
+  /** Pares pelo TURN cuja voz agora chega por um repetidor: a ligação fica de pé, mas sem mídia. */
+  private silenced = new Set<string>();
+  private emitted = new Map<string, MediaStream[]>();
+  private peerEnv: PeerEnv;
+
+  constructor(private events: MediaEvents, private settings: () => Settings) {
+    this.peerEnv = {
+      events,
+      ice: () => this.iceServers,
+      gameMode: () => this.settings().gameMode,
+      blocked: (id) => this.blocked(id),
+      onStable: (peer) => {
+        if (!peer.open) {
+          peer.open = true;
+          this.publishAll(peer.id);
+        }
+        this.applyBitrates();
+        this.refreshRelays();
+      },
+      onPath: () => {
+        this.applyPlan();
+        this.refreshStreams();
+        this.applyBitrates();
+        this.events.paths();
+      },
+      onStreams: () => {
+        this.refreshRelays();
+        this.refreshStreams();
+      },
+    };
+  }
 
   private micAudio(deviceId: ConstrainDOMString | undefined): MediaStreamConstraints {
     const s = this.settings();
@@ -303,10 +476,10 @@ export class MediaEngine {
 
   private swapMicTrack(previous: MediaStreamTrack, track: MediaStreamTrack | null) {
     const pending: Promise<void>[] = [];
-    for (const map of this.senders.values()) {
+    for (const [id, map] of this.senders) {
       const sender = map.get(previous);
       if (!sender) continue;
-      pending.push(sender.replaceTrack(track));
+      pending.push(sender.replaceTrack(track && this.outgoing(id, track)));
       map.delete(previous);
       if (track) map.set(track, sender);
     }
@@ -421,15 +594,10 @@ export class MediaEngine {
     if (peer) return peer;
     // A primeira oferta tem dono fixo. Se os dois oferecessem juntos, o lado que recua
     // às vezes para de coletar candidatos no Chromium e o par nunca conecta.
-    const created: MeshPeer = new MeshPeer(id, this.selfId > id, this.iceServers, this.events, () => this.settings().gameMode, () => {
-      if (!created.open) {
-        created.open = true;
-        this.publishAll(id);
-      }
-      this.applyBitrates();
-    });
+    const created = new MeshPeer(id, this.selfId > id, this.peerEnv);
     this.peers.set(id, created);
     this.senders.set(id, new Map());
+    this.applyPlan();
     if (created.open) {
       this.publishAll(id);
       // Sem microfone ainda é preciso oferecer, senão quem só ouve nunca conecta.
@@ -446,13 +614,26 @@ export class MediaEngine {
   }
 
   dropPeer(id: string) {
+    for (const key of [...this.relaying]) if (key.split('>').includes(id)) this.stopForward(key);
     this.peers.get(id)?.close();
     this.peers.delete(id);
     this.senders.delete(id);
     this.watchers.delete(id);
     this.videoPaused.delete(id);
     this.asked.delete(id);
+    this.silenced.delete(id);
+    for (const [key, origin] of [...this.relayedIn]) if (key.startsWith(`${id}:`) || origin === id) this.relayedIn.delete(key);
+    this.emitted.delete(id);
     this.events.streams(id, []);
+    this.refreshStreams(); // quem chegava por esta pessoa perde a voz até o próximo plano
+    this.events.paths();
+  }
+
+  /** O que cada trilha deve enviar a este par agora: nada se está pausado ou com o vídeo recusado. */
+  private outgoing(id: string, track: MediaStreamTrack) {
+    if (this.silenced.has(id)) return null;
+    if (track.kind === 'video' && this.videoPaused.has(id)) return null;
+    return track;
   }
 
   private publish(id: string, stream: MediaStream) {
@@ -463,9 +644,8 @@ export class MediaEngine {
       if (map.has(track)) continue;
       const sender = peer.pc.addTrack(track, stream);
       map.set(track, sender);
-      if (track.kind !== 'video') continue;
-      preferEfficientCodec(peer.pc, sender);
-      if (this.videoPaused.has(id)) void sender.replaceTrack(null);
+      if (track.kind === 'video') preferEfficientCodec(peer.pc, sender);
+      if (!this.outgoing(id, track)) void sender.replaceTrack(null);
     }
   }
 
@@ -483,6 +663,7 @@ export class MediaEngine {
   }
 
   async onSignal(from: string, data: any) {
+    if (data?.relayed) return this.onRelayed(from, data.relayed);
     if (data?.watchFull) return this.events.watchRefused(from);
     if (data?.watch !== undefined) return this.setWatcher(from, Boolean(data.watch));
     if (data?.video !== undefined) return this.setVideoWanted(from, Boolean(data.video));
@@ -535,9 +716,9 @@ export class MediaEngine {
     for (const [id, map] of this.senders) {
       const sender = map.get(previous);
       if (!sender) continue;
-      if (!this.videoPaused.has(id)) await sender.replaceTrack(track);
       map.delete(previous);
       map.set(track, sender);
+      await sender.replaceTrack(this.outgoing(id, track));
     }
     previous.onended = null;
     previous.stop();
@@ -646,7 +827,7 @@ export class MediaEngine {
     if (want) this.videoPaused.delete(id);
     else this.videoPaused.add(id);
     for (const [track, sender] of this.senders.get(id) ?? []) {
-      if (track.kind === 'video') void sender.replaceTrack(want ? track : null);
+      if (track.kind === 'video') void sender.replaceTrack(this.outgoing(id, track));
     }
   }
 
@@ -661,19 +842,30 @@ export class MediaEngine {
     for (const [id, map] of this.senders) {
       // Durante a negociação o navegador rejeita setParameters; reaplica ao estabilizar.
       if (this.peers.get(id)?.pc.signalingState !== 'stable') continue;
+      const turn = this.peers.get(id)?.path === 'turn';
       for (const [track, sender] of map) {
         const isCamera = track.kind === 'video' && this.camera?.getTracks().includes(track);
         const isScreen = this.screen?.getVideoTracks().includes(track);
         const isMusic = this.radio?.getTracks().includes(track) || this.screen?.getAudioTracks().includes(track);
-        if (!isCamera && !isScreen && !isMusic) continue;
+        const isVoice = !!this.mic?.getAudioTracks().includes(track);
+        if (!isCamera && !isScreen && !isMusic && !isVoice) continue;
         const params = sender.getParameters();
-        const wanted: RTCRtpEncodingParameters = isMusic
-          ? { maxBitrate: MUSIC_BITRATE }
-          : isCamera
-            ? cameraEncoding(count, this.lite)
-            : { maxBitrate: this.screenBitrate(), maxFramerate: this.screenPreset.frameRate };
         const current = params.encodings?.[0];
-        if (!current || Object.entries(wanted).every(([k, v]) => current[k as keyof typeof current] === v)) continue;
+        if (!current) continue;
+        if (isVoice) {
+          // A voz só ganha teto pelo TURN; no caminho direto fica com o padrão do navegador.
+          if (turn === (current.maxBitrate === TURN_VOICE_BITRATE)) continue;
+          if (turn) current.maxBitrate = TURN_VOICE_BITRATE;
+          else delete current.maxBitrate;
+          sender.setParameters(params).catch((err) => console.warn(`bitrate de ${id}`, err));
+          continue;
+        }
+        const wanted: RTCRtpEncodingParameters = isMusic
+          ? { maxBitrate: turn ? TURN_MUSIC_BITRATE : MUSIC_BITRATE }
+          : isCamera
+            ? cameraEncoding(count, this.lite || turn)
+            : { maxBitrate: turn ? Math.min(TURN_SCREEN_BITRATE, this.screenBitrate()) : this.screenBitrate(), maxFramerate: this.screenPreset.frameRate };
+        if (Object.entries(wanted).every(([k, v]) => current[k as keyof typeof current] === v)) continue;
         Object.assign(current, wanted);
         if (isScreen) params.degradationPreference = this.screenPreset.prefer;
         sender.setParameters(params).catch((err) => console.warn(`bitrate de ${id}`, err));
@@ -699,6 +891,8 @@ export class MediaEngine {
         encodeSeconds: 0,
         framesEncoded: 0,
         codec: null,
+        path: peer.path,
+        via: this.viaFor(id),
       };
       const report = await peer.pc.getStats();
       const describe = (e: any) => `${e.frameWidth ?? 0}×${e.frameHeight ?? 0} ${Math.round(e.framesPerSecond ?? 0)} qps`;
@@ -729,8 +923,180 @@ export class MediaEngine {
     return result;
   }
 
+  // --- Repetidor: quem alcança os dois lados de um par bloqueado repassa a voz entre eles. ---
+
+  /** Plano do host da sala (src/lib/relayPlan.ts). */
+  setRelayPlan(pairs: RelayPair[]) {
+    this.plan = Array.isArray(pairs) ? pairs : [];
+    this.applyPlan();
+    this.refreshStreams();
+    this.applyBitrates();
+  }
+
+  private entryWith(id: string) {
+    const me = this.selfId;
+    return this.plan.find((p) => (p.a === me && p.b === id) || (p.b === me && p.a === id));
+  }
+
+  private applyPlan() {
+    const me = this.selfId;
+    for (const [id, peer] of this.peers) {
+      const entry = this.entryWith(id);
+      // Último caso: sem ninguém para repassar, o par libera o TURN.
+      if (entry && !entry.via && peer.path !== 'direct' && peer.gaveUp) peer.escalate();
+      // Se o par já estava no TURN e um repetidor assumiu, a ligação para de levar mídia.
+      this.setSilenced(id, !!entry?.via && peer.path === 'turn');
+    }
+    const wanted = new Set<string>();
+    for (const p of this.plan) {
+      if (p.via !== me) continue;
+      wanted.add(`${p.a}>${p.b}`);
+      wanted.add(`${p.b}>${p.a}`);
+    }
+    for (const key of [...this.relaying]) if (!wanted.has(key)) this.stopForward(key);
+    this.relaying = wanted;
+    this.refreshRelays();
+  }
+
+  private setSilenced(id: string, on: boolean) {
+    if (on === this.silenced.has(id)) return;
+    if (on) this.silenced.add(id);
+    else this.silenced.delete(id);
+    for (const [track, sender] of this.senders.get(id) ?? []) void sender.replaceTrack(this.outgoing(id, track)).catch(() => {});
+  }
+
+  /** Repassa só áudio: voz e rádio. Tela e câmera ficariam pesadas demais para quem ajuda. */
+  private refreshRelays() {
+    for (const key of this.relaying) {
+      const [origin, target] = key.split('>');
+      const source = this.peers.get(origin);
+      const dest = this.peers.get(target);
+      if (!source || !dest?.open || dest.pc.signalingState === 'closed') continue;
+      const map = this.forwards.get(key) ?? new Map<MediaStreamTrack, RTCRtpSender>();
+      this.forwards.set(key, map);
+      const told = this.announced.get(key) ?? new Set<string>();
+      this.announced.set(key, told);
+      const live = new Set<MediaStreamTrack>();
+      for (const stream of source.streams) {
+        // Sem vídeo e sem o que já chega repassado: nada de corrente de repetidores.
+        if (stream.getVideoTracks().length || this.relayedIn.has(`${origin}:${stream.id}`)) continue;
+        if (!told.has(stream.id)) {
+          // O aviso vai antes da trilha: quem recebe já sabe de quem é o áudio quando ele chega.
+          told.add(stream.id);
+          this.events.signal(target, { relayed: { stream: stream.id, origin } });
+        }
+        for (const track of stream.getAudioTracks()) {
+          live.add(track);
+          if (!map.has(track)) map.set(track, dest.pc.addTrack(track, stream));
+        }
+      }
+      for (const [track, sender] of map) {
+        if (live.has(track)) continue;
+        dest.pc.removeTrack(sender);
+        map.delete(track);
+      }
+    }
+  }
+
+  private stopForward(key: string) {
+    const [origin, target] = key.split('>');
+    const dest = this.peers.get(target);
+    for (const sender of this.forwards.get(key)?.values() ?? []) {
+      if (dest && dest.pc.signalingState !== 'closed') dest.pc.removeTrack(sender);
+    }
+    for (const stream of this.announced.get(key) ?? []) {
+      if (dest) this.events.signal(target, { relayed: { stream, origin, stop: true } });
+    }
+    this.forwards.delete(key);
+    this.announced.delete(key);
+    this.relaying.delete(key);
+  }
+
+  private onRelayed(from: string, data: any) {
+    const stream = typeof data?.stream === 'string' ? data.stream.slice(0, 64) : '';
+    const origin = typeof data?.origin === 'string' ? data.origin : '';
+    if (!stream || origin === from || origin === this.selfId) return;
+    const key = `${from}:${stream}`;
+    // Guarda mesmo antes do plano chegar: assim o áudio nunca toca como se fosse do repetidor.
+    if (data.stop) this.relayedIn.delete(key);
+    else this.relayedIn.set(key, origin);
+    this.refreshStreams();
+  }
+
+  /** Só vale o repasse que o plano previu: ninguém se passa por outra pessoa. */
+  private planned(relay: string, origin: string) {
+    const me = this.selfId;
+    return this.plan.some((p) => p.via === relay && ((p.a === origin && p.b === me) || (p.b === origin && p.a === me)));
+  }
+
+  /** O caminho próprio com esta pessoa está levando mídia? */
+  private carries(id: string) {
+    const peer = this.peers.get(id);
+    return !!peer && (peer.path === 'direct' || (peer.path === 'turn' && !this.silenced.has(id)));
+  }
+
+  /**
+   * Monta o que a interface toca de cada pessoa. A cópia repassada tem o mesmo id do stream
+   * original e só entra quando o caminho próprio não leva mídia: nunca há áudio em dobro.
+   */
+  private refreshStreams() {
+    const out = new Map<string, MediaStream[]>();
+    for (const [id, peer] of this.peers) out.set(id, peer.streams.filter((s) => !this.relayedIn.has(`${id}:${s.id}`)));
+    for (const [relay, peer] of this.peers) {
+      for (const stream of peer.streams) {
+        const origin = this.relayedIn.get(`${relay}:${stream.id}`);
+        const list = origin ? out.get(origin) : undefined;
+        if (!origin || !list || this.carries(origin) || !this.planned(relay, origin)) continue;
+        const index = list.findIndex((s) => s.id === stream.id);
+        if (index >= 0) list[index] = stream;
+        else list.push(stream);
+      }
+    }
+    for (const [id, list] of out) {
+      const before = this.emitted.get(id);
+      if (before && before.length === list.length && before.every((s, i) => s === list[i])) continue;
+      this.emitted.set(id, list);
+      this.events.streams(id, list);
+    }
+  }
+
+  /** Quem está entregando a voz desta pessoa por repasse, se houver. */
+  viaFor(id: string) {
+    if (this.carries(id)) return null;
+    for (const [key, origin] of this.relayedIn) {
+      const relay = key.slice(0, key.indexOf(':'));
+      if (origin === id && this.planned(relay, origin)) return relay;
+    }
+    return null;
+  }
+
+  /** Quantos pares este lado está ajudando agora. */
+  get helping() {
+    return this.plan.filter((p) => p.via === this.selfId).length;
+  }
+
+  /** O que o host precisa para planejar: caminho e atraso de cada ligação. */
+  async linkReport(): Promise<Record<string, LinkInfo>> {
+    const out: Record<string, LinkInfo> = {};
+    for (const [id, peer] of this.peers) {
+      let rtt: number | null = null;
+      try {
+        const report = await peer.pc.getStats();
+        report.forEach((entry: any) => {
+          if (entry.type === 'candidate-pair' && entry.nominated && typeof entry.currentRoundTripTime === 'number') rtt = entry.currentRoundTripTime * 1000;
+        });
+      } catch {
+        // Ligação fechada no meio da leitura.
+      }
+      out[id] = { path: peer.path, rtt };
+    }
+    return out;
+  }
+
   stopAll() {
     this.micToken++; // cancela aberturas e trocas de microfone em andamento
+    this.plan = [];
+    this.relaying.clear();
     this.syncPeers([]);
     this.chain?.close();
     for (const stream of [this.micRaw, this.mic, this.camera, this.screen, this.radio]) {

@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { createRoom, joinRoom, person, say, shots } from './helpers';
+import { expect } from '@playwright/test';
+import { createRoom, joinRoom, person, say, shots, test } from './helpers';
 
 const room = async (browser: any) => {
   const host = await person(browser, 'Host');

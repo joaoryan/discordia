@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { createRoom, joinRoom, person, say } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { createRoom, joinRoom, person, say, test } from './helpers';
 
 // Registra cada som pedido, depois de passar pelas preferências da pessoa.
 const record = (page: Page) => page.evaluate(() => {

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { createRoom, joinRoom, person, shots } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { createRoom, joinRoom, person, shots, test } from './helpers';
 
 const stats = (page: Page) => page.evaluate(() => (window as any).session.media.stats());
 const receivedFrom = async (page: Page) => Object.values(await stats(page)).map((s: any) => s.inbound);

@@ -79,7 +79,16 @@ Depois de mudar a logo, `node scripts/icons.mjs` gera de novo os ícones e a ima
 
 ### 5. TURN (recomendado)
 
-Sem TURN, quem estiver atrás de NAT restritivo não conecta. O Worker usa a Metered, com 50 GB grátis por mês e sem cartão: `METERED_APP` fica em `worker/wrangler.toml`, e a chave vai como segredo:
+Sem TURN, quem estiver atrás de NAT restritivo não conecta, como duas casas na mesma operadora com CGNAT.
+
+O principal é o ExpressTURN, com 1.000 GB grátis por mês e sem cartão. O servidor (`EXPRESSTURN_SERVER`) fica em `worker/wrangler.toml`; o usuário e a senha, do painel do ExpressTURN, vão como segredos. Como essa credencial é fixa, o `ALLOWED_ORIGINS` precisa estar fechado ao domínio do site.
+
+```bash
+npx wrangler secret put EXPRESSTURN_USER --config worker/wrangler.toml
+npx wrangler secret put EXPRESSTURN_PASS --config worker/wrangler.toml
+```
+
+A Metered fica de reserva, só nas portas 443, para redes que barram a 3478. Ela tem 500 MB grátis por mês sem cartão: `METERED_APP` fica em `worker/wrangler.toml`, e a chave vai como segredo:
 
 ```bash
 npx wrangler secret put METERED_API_KEY --config worker/wrangler.toml
