@@ -15,6 +15,8 @@ export const allDownloads = RELEASES;
 
 const LATEST_API = 'https://api.github.com/repos/joaoryan/discordia/releases/latest';
 const VERSION_KEY = 'discordia.latestVersion';
+// Curto: o sessionStorage sobrevive ao F5, e uma versão nova tem de aparecer sem fechar a aba.
+const VERSION_TTL_MS = 10 * 60 * 1000;
 
 /** "v1.2.0" → "1.2.0"; qualquer outra coisa vira null. */
 export function parseVersion(tag: unknown): string | null {
@@ -22,18 +24,18 @@ export function parseVersion(tag: unknown): string | null {
   return match ? match[1] : null;
 }
 
-/** Versão do último Release, para o botão dizer o que vai baixar. Guarda na aba para não repetir a consulta. */
+/** Versão do último Release, para o botão dizer o que vai baixar. Guarda na aba por 10 min para não repetir a consulta. */
 export async function latestVersion(): Promise<string | null> {
   try {
-    const cached = sessionStorage.getItem(VERSION_KEY);
-    if (cached) return cached;
+    const cached = JSON.parse(sessionStorage.getItem(VERSION_KEY) ?? 'null') as { version?: string; at?: number } | null;
+    if (cached?.version && Date.now() - (cached.at ?? 0) < VERSION_TTL_MS) return cached.version;
   } catch {}
   try {
     const res = await fetch(LATEST_API, { headers: { Accept: 'application/vnd.github+json' } });
     if (!res.ok) return null;
     const version = parseVersion(((await res.json()) as { tag_name?: unknown }).tag_name);
     try {
-      if (version) sessionStorage.setItem(VERSION_KEY, version);
+      if (version) sessionStorage.setItem(VERSION_KEY, JSON.stringify({ version, at: Date.now() }));
     } catch {}
     return version;
   } catch {

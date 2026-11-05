@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { downloadFor, parseVersion } from '../src/lib/download';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { downloadFor, latestVersion, parseVersion } from '../src/lib/download';
 
 describe('botão de baixar', () => {
   it('escolhe o instalador do sistema', () => {
@@ -20,5 +20,38 @@ describe('botão de baixar', () => {
     expect(parseVersion('2.0.10')).toBe('2.0.10');
     expect(parseVersion('nightly')).toBeNull();
     expect(parseVersion(undefined)).toBeNull();
+  });
+});
+
+describe('versão do último Release', () => {
+  const store = new Map<string, string>();
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    store.clear();
+  });
+
+  function stub(tags: string[]) {
+    vi.stubGlobal('sessionStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) });
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ tag_name: tags.shift() }) }));
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  }
+
+  it('lembra por 10 minutos e depois consulta de novo', async () => {
+    vi.useFakeTimers();
+    const fetch = stub(['v1.1.0', 'v1.1.1']);
+    expect(await latestVersion()).toBe('1.1.0');
+    vi.advanceTimersByTime(9 * 60 * 1000);
+    expect(await latestVersion()).toBe('1.1.0');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect(await latestVersion()).toBe('1.1.1');
+  });
+
+  it('ignora o formato antigo, guardado sem data', async () => {
+    stub(['v1.1.1']);
+    store.set('discordia.latestVersion', '1.1.0');
+    expect(await latestVersion()).toBe('1.1.1');
   });
 });
